@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user profile information",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "dismissedAlerts": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["userId"]
+    },
+    "Account": {
+      "title": "Bank Account",
+      "description": "Stores bank account details",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "balance": { "type": "number" },
+        "currency": { "type": "string" },
+        "iban": { "type": "string" },
+        "bankName": { "type": "string" }
+      },
+      "required": ["accountId", "userId", "name", "balance", "currency"]
+    },
+    "Transaction": {
+      "title": "Bank Transaction",
+      "description": "A single bank transaction",
+      "type": "object",
+      "properties": {
+        "transaction_id": { "type": "string" },
+        "userId": { "type": "string" },
+        "accountId": { "type": "string" },
+        "name": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "bookingDate": { "type": "string" },
+        "valueDate": { "type": "string" },
+        "category": { "type": "string" },
+        "superCategory": { "type": "string" },
+        "counterparty": { "type": "string" },
+        "counterpartyIban": { "type": "string" },
+        "mcc": { "type": "string" },
+        "mccDescription": { "type": "string" },
+        "receiptDetails": { "type": "object" }
+      },
+      "required": ["transaction_id", "userId", "name", "amount", "date"]
+    },
+    "LearnedCategory": {
+      "title": "Learned Category",
+      "description": "Maps a transaction name to a specific category and super category",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "superCategory": { "type": "string" }
+      },
+      "required": ["name"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document"
+    },
+    "/users/{userId}/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "User's bank accounts"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "User's bank transactions"
+    },
+    "/users/{userId}/learned_categories/{categoryId}": {
+      "schema": "LearnedCategory",
+      "description": "User's learned auto-classification category rules"
+    }
+  }
+}

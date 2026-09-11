@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) { 
+      return id is string && id.size() > 0 && id.size() <= 1500 && id.matches('^[^/]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+
+    function isValidUser(data, userId) {
+      return data.keys().hasAll(['userId']) &&
+             data.userId == userId &&
+             ( !('createdAt' in data) || data.createdAt is timestamp ) &&
+             ( !('dismissedAlerts' in data) || (data.dismissedAlerts is list && data.dismissedAlerts.size() <= 200) );
+    }
+
+    function isValidAccount(data, userId) {
+      return data.keys().hasAll(['accountId', 'userId', 'name', 'balance', 'currency']) &&
+             data.accountId is string && data.accountId.size() <= 128 &&
+             data.userId == userId &&
+             data.name is string && data.name.size() <= 128 &&
+             data.balance is number &&
+             data.currency is string && data.currency.size() <= 10 &&
+             ( !('iban' in data) || (data.iban is string && data.iban.size() <= 64) ) &&
+             ( !('bankName' in data) || (data.bankName is string && data.bankName.size() <= 128) );
+    }
+
+    function isValidTransaction(data, userId) {
+      return data.keys().hasAll(['transaction_id', 'userId', 'name', 'amount', 'date']) &&
+             data.transaction_id is string && data.transaction_id.size() <= 128 &&
+             data.userId == userId &&
+             data.name is string && data.name.size() <= 256 &&
+             data.amount is number &&
+             data.date is string && data.date.size() <= 32 &&
+             ( !('accountId' in data) || (data.accountId is string && data.accountId.size() <= 128) ) &&
+             ( !('bookingDate' in data) || (data.bookingDate is string && data.bookingDate.size() <= 32) ) &&
+             ( !('valueDate' in data) || (data.valueDate is string && data.valueDate.size() <= 32) ) &&
+             ( !('category' in data) || (data.category is string && data.category.size() <= 128) ) &&
+             ( !('superCategory' in data) || (data.superCategory is string && data.superCategory.size() <= 128) ) &&
+             ( !('counterparty' in data) || (data.counterparty is string && data.counterparty.size() <= 256) ) &&
+             ( !('counterpartyIban' in data) || (data.counterpartyIban is string && data.counterpartyIban.size() <= 64) ) &&
+             ( !('mcc' in data) || (data.mcc is string && data.mcc.size() <= 32) ) &&
+             ( !('mccDescription' in data) || (data.mccDescription is string && data.mccDescription.size() <= 256) ) &&
+             ( !('receiptDetails' in data) || (data.receiptDetails is map) ) &&
+             ( !('account_id' in data) || (data.account_id is string && data.account_id.size() <= 128) );
+    }
+
+    function isValidLearnedCategory(data) {
+      return data.keys().hasAll(['name']) &&
+             data.name is string && data.name.size() <= 256 &&
+             ( !('category' in data) || (data.category is string && data.category.size() <= 128) ) &&
+             ( !('superCategory' in data) || (data.superCategory is string && data.superCategory.size() <= 128) );
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false; // Users shouldn't be listed
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming(), userId) && incoming().keys().size() <= 3;
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming(), userId) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['dismissedAlerts']);
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /accounts/{accountId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(accountId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(accountId) && isValidAccount(incoming(), userId) && incoming().keys().size() <= 7;
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(accountId) && isValidAccount(incoming(), userId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'balance', 'currency', 'iban', 'bankName']);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(accountId);
+      }
+
+      match /transactions/{transactionId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(transactionId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(transactionId) && isValidTransaction(incoming(), userId) && incoming().keys().size() <= 16;
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(transactionId) && isValidTransaction(incoming(), userId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['category', 'superCategory', 'receiptDetails']);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(transactionId);
+      }
+
+      match /learned_categories/{categoryId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(categoryId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(categoryId) && isValidLearnedCategory(incoming()) && incoming().keys().size() <= 3;
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(categoryId) && isValidLearnedCategory(incoming()) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['category', 'superCategory']);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(categoryId);
+      }
+    }
+  }
+}
