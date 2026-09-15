@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Transaction } from "./lib/firestore";
 import { TrendingDown, Scissors, Repeat, Wallet, Info } from "lucide-react";
 
-export function Overview({ transactions }: { transactions: Transaction[] }) {
+export function Overview({ transactions, userPaydayStart, userPaydayEnd }: { transactions: Transaction[], userPaydayStart?: number | null, userPaydayEnd?: number | null }) {
   const [view, setView] = useState<"dashboard" | "savings">("dashboard");
   const [recurringThreshold, setRecurringThreshold] = useState<number>(2);
   const [subscriptionMonthsBack, setSubscriptionMonthsBack] = useState<number>(6);
@@ -10,8 +10,47 @@ export function Overview({ transactions }: { transactions: Transaction[] }) {
   const [antExpenseThreshold, setAntExpenseThreshold] = useState<number>(10);
 
   const insights = useMemo(() => {
-    const currentMonthDate = new Date();
-    const currentMonthKey = `${currentMonthDate.getFullYear()}-${String(currentMonthDate.getMonth() + 1).padStart(2, "0")}`;
+    let cycleStartDateStr = "";
+    
+    const sortedByDate = [...transactions].sort((a, b) => b.date.localeCompare(a.date));
+    const startWindow = userPaydayStart || 24;
+    const endWindow = userPaydayEnd || 31;
+    
+    for (const t of sortedByDate) {
+      const day = parseInt(t.date.substring(8, 10), 10);
+      const isNomina = t.category === "💼 Nómina / Pensión" || 
+                       t.name.toLowerCase().includes("nomina") || 
+                       t.name.toLowerCase().includes("nómina");
+      
+      let inWindow = false;
+      if (startWindow <= endWindow) {
+         inWindow = day >= startWindow && day <= endWindow;
+      } else {
+         inWindow = day >= startWindow || day <= endWindow;
+      }
+      
+      // Fallback: any large income around the user's configured payday window
+      const isLikelySalary = t.amount > 600 && inWindow;
+      
+      if (t.amount > 0 && (isNomina || isLikelySalary)) {
+        cycleStartDateStr = t.date;
+        break;
+      }
+    }
+
+    // Fallback if no salary found at all
+    if (!cycleStartDateStr) {
+      const today = new Date();
+      let fallbackDate: Date;
+      const fallbackDay = userPaydayStart || 28;
+      if (today.getDate() >= fallbackDay) {
+        fallbackDate = new Date(today.getFullYear(), today.getMonth(), fallbackDay);
+      } else {
+        fallbackDate = new Date(today.getFullYear(), today.getMonth() - 1, fallbackDay);
+      }
+      const formatDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      cycleStartDateStr = formatDate(fallbackDate);
+    }
     
     let totalIncome = 0;
     let totalExpenses = 0;
@@ -27,7 +66,7 @@ export function Overview({ transactions }: { transactions: Transaction[] }) {
     const antLimitDateStr = antLimitDate.toISOString().substring(0, 10);
 
     transactions.forEach(t => {
-      if (t.date.startsWith(currentMonthKey)) {
+      if (t.date >= cycleStartDateStr) {
         if (t.amount > 0) totalIncome += t.amount;
         else totalExpenses += Math.abs(t.amount);
       }
@@ -78,7 +117,7 @@ export function Overview({ transactions }: { transactions: Transaction[] }) {
 
           // Add to current month recurring if we paid it this month
           txs.forEach(t => {
-            if (t.date.startsWith(currentMonthKey)) {
+            if (t.date >= cycleStartDateStr) {
               currentMonthRecurring += Math.abs(t.amount);
             }
           });
@@ -90,6 +129,7 @@ export function Overview({ transactions }: { transactions: Transaction[] }) {
     const potentialSavings = totalIncome - totalExpenses;
 
     return {
+      cycleStartDateStr,
       totalIncome,
       totalExpenses,
       currentMonthRecurring,
@@ -100,7 +140,7 @@ export function Overview({ transactions }: { transactions: Transaction[] }) {
       recurring,
       totalRecurringNextMonth
     };
-  }, [transactions, recurringThreshold, subscriptionMonthsBack, antExpenseMonthsBack, antExpenseThreshold]);
+  }, [transactions, recurringThreshold, subscriptionMonthsBack, antExpenseMonthsBack, antExpenseThreshold, userPaydayStart, userPaydayEnd]);
 
   return (
     <div className="space-y-6 pt-6 animate-fade-in">
@@ -168,7 +208,7 @@ function CashflowDashboard({ insights }: { insights: any }) {
       
       {/* Waterfall Visualizer */}
       <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-200 mb-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-0 relative">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-0 relative">
           <div className="hidden md:block absolute top-1/2 left-0 right-0 h-0.5 bg-slate-100 -z-10 -translate-y-1/2"></div>
           
           <div className="flex flex-col items-center p-4 bg-white z-10">
@@ -178,28 +218,18 @@ function CashflowDashboard({ insights }: { insights: any }) {
             <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">Ingresos</span>
             <span className="text-3xl font-black text-emerald-600">{insights.totalIncome.toFixed(0)} €</span>
           </div>
-
-          <div className="flex flex-col items-center p-4 bg-white z-10">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center font-bold text-2xl mb-4 border border-slate-200">
-              -
-            </div>
-            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1 text-center">Gastos Fixos<br/><span className="text-[10px] normal-case font-medium">(Recorrentes)</span></span>
-            <span className="text-3xl font-black text-slate-700">{insights.currentMonthRecurring.toFixed(0)} €</span>
-          </div>
-
           <div className="flex flex-col items-center p-4 bg-white z-10">
             <div className="w-16 h-16 rounded-2xl bg-rose-100 text-rose-500 flex items-center justify-center font-bold text-2xl mb-4 border border-rose-200">
               -
             </div>
-            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1 text-center">Gastos Variables<br/><span className="text-[10px] normal-case font-medium">(Día a día)</span></span>
-            <span className="text-3xl font-black text-rose-600">{insights.currentMonthVariable.toFixed(0)} €</span>
+            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1 text-center">Gastos</span>
+            <span className="text-3xl font-black text-rose-600">{insights.totalExpenses.toFixed(0)} €</span>
           </div>
-
           <div className="flex flex-col items-center p-4 bg-white z-10">
             <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-bold text-2xl mb-4 border ${insights.potentialSavings >= 0 ? "bg-slate-900 text-white border-slate-900" : "bg-rose-600 text-white border-rose-700"}`}>
               =
             </div>
-            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1 text-center">Aforro Potencial<br/><span className="text-[10px] normal-case font-medium">(Marxe)</span></span>
+            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1 text-center">Aforro Total<br/><span className="text-[10px] normal-case font-medium">(Marxe)</span></span>
             <span className={`text-3xl font-black ${insights.potentialSavings >= 0 ? "text-slate-900" : "text-rose-600"}`}>
               {insights.potentialSavings.toFixed(0)} €
             </span>
@@ -210,7 +240,7 @@ function CashflowDashboard({ insights }: { insights: any }) {
       <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 flex items-start gap-4">
         <Info className="text-blue-500 shrink-0 mt-0.5" size={20} />
         <p className="text-sm text-blue-900 font-medium">
-          O <strong>Fluxo de Caixa (Cashflow)</strong> separa os teus gastos en dúas partes: aquilo que non podes evitar facilmente (Gastos Fixos / Recorrentes) e as túas decisións do día a día (Gastos Variables). Reducir os variables é a forma máis rápida de aumentar o teu marxe, mentres que reducir os fixos mellora a túa saúde financeira a longo prazo.
+          A <strong>Radiografía do Mes Actual</strong> móstrache o resumo de ingresos e gastos contabilizados dende a túa última nómina (detectada o {insights.cycleStartDateStr.split('-').reverse().join('/')}). O teu <strong>Aforro Total</strong> é a diferenza directa entre o que entrou e o que saíu neste ciclo.
         </p>
       </div>
     </div>

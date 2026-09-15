@@ -807,3 +807,29 @@ export async function dismissInsightAlert(alertId: string): Promise<void> {
     console.error("Error updating dismissed alerts", error);
   }
 }
+
+export async function getUserProfile() {
+  const user = auth.currentUser;
+  if (!user) return null;
+  const path = `users/${user.uid}`;
+  try {
+    const docSnap = await getDoc(doc(db, path));
+    if (docSnap.exists()) {
+      return docSnap.data();
+    }
+  } catch (error) {
+    console.error("Error getting user profile", error);
+  }
+  return null;
+}
+
+export async function updateUserPaydayRange(paydayStart: number, paydayEnd: number) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `users/${user.uid}`;
+  try {
+    await setDoc(doc(db, path), { paydayStart, paydayEnd }, { merge: true });
+  } catch (error) {
+    console.error("Error updating user payday", error);
+  }
+}

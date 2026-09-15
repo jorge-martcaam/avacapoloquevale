@@ -9,32 +9,14 @@ import {
   Calendar,
   Search,
   Bell,
-  PiggyBank,
-  ArrowDownRight,
-  ArrowUpRight,
-  BarChart2,
-  TrendingUp,
-  TrendingDown,
-  Info,
+  Settings,
 } from "lucide-react";
 import { auth, logout } from "./lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-} from "recharts";
-import {
   saveTransactionsToFirestore,
   getTransactionsFromFirestore,
-  createUserProfile,
+  createUserProfile, getUserProfile, updateUserPaydayRange,
   deleteAllUserTransactions,
   Transaction,
   saveAccountsToFirestore,
@@ -300,9 +282,7 @@ function EnableBankingConnectButton({
 }) {
   const [aspsps, setAspsps] = useState<any[]>([]);
   const [selectedAspsp, setSelectedAspsp] = useState<string>("");
-  const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showDropdown, setShowDropdown] = useState(false);
   const [step, setStep] = useState(1);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
@@ -1338,15 +1318,6 @@ function CategoriesManager({
     setShowTxSuggestions(false);
   };
 
-  const handleEditSuperCatClick = (
-    category: string,
-    currentSuper: string,
-    e: React.MouseEvent,
-  ) => {
-    e.stopPropagation();
-    setEditingSuperCatFor(category);
-    setSuperCatEditVal(currentSuper);
-  };
 
   const handleSaveSuperCat = async (category: string, oldSuperCat: string) => {
     if (superCatEditVal.trim() !== oldSuperCat) {
@@ -1482,23 +1453,6 @@ function CategoriesManager({
     }
     setEditingCategory(null);
   };
-
-  const sortedCategories = [...activeCategories].sort((a, b) => {
-    if (sortBy === "alpha") return a.localeCompare(b);
-
-    const txsA = filteredTxs.filter((t) => t.category === a);
-    const txsB = filteredTxs.filter((t) => t.category === b);
-
-    if (sortBy === "count") return txsB.length - txsA.length;
-
-    if (sortBy === "amount") {
-      const sumA = Math.abs(txsA.reduce((acc, t) => acc + t.amount, 0));
-      const sumB = Math.abs(txsB.reduce((acc, t) => acc + t.amount, 0));
-      return sumB - sumA;
-    }
-
-    return 0;
-  });
 
   // Calculate available super categories for suggestions
   const superCategories = Array.from(
@@ -2372,42 +2326,9 @@ export default function App() {
 
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([]);
   const [currentTab, setCurrentTab] = useState<
-    "overview" | "movements" | "categories" | "import" | "analysis" | "insights"
+    "overview" | "movements" | "categories" | "import" | "insights"
   >("overview");
-  const [chartTimeframe, setChartTimeframe] = useState<
-    "month" | "6months" | "year"
-  >("month");
-  const [chartGranularity, setChartGranularity] = useState<
-    "month" | "week" | "day"
-  >("day");
-
-  const [heatmapTimeframe, setHeatmapTimeframe] = useState<
-    "month" | "6months" | "year"
-  >("6months");
-  const [heatmapMetric, setHeatmapMetric] = useState<
-    "gastos" | "ingresos" | "balance"
-  >("gastos");
-  const [heatmapValueType, setHeatmapValueType] = useState<"sum" | "avg">(
-    "sum",
-  );
-  const [analysisDateType, setAnalysisDateType] = useState<
-    "operation" | "booking"
-  >("operation");
-
-  const [catChartTimeframe, setCatChartTimeframe] = useState<
-    "month" | "6months" | "year" | "all"
-  >("month");
-  const [catChartType, setCatChartType] = useState<"gastos" | "ingresos" | "balance">(
-    "gastos",
-  );
-  const [expandedChartNodes, setExpandedChartNodes] = useState<Set<string>>(new Set());
-  const [catChartSortOrder, setCatChartSortOrder] = useState<"desc" | "asc">("desc");
-  const [catChartGrouping, setCatChartGrouping] = useState<
-    "superCategory" | "category" | "movement"
-  >("category");
-
   const [searchQuery, setSearchQuery] = useState("");
-
   const [categoryUpdateDialog, setCategoryUpdateDialog] = useState<{
     txId: string;
     newCategory: string;
@@ -2415,7 +2336,6 @@ export default function App() {
     similarCount: number;
     showSystemLearn: boolean;
   } | null>(null);
-
   const [superCategoryUpdateDialog, setSuperCategoryUpdateDialog] = useState<{
     txId: string;
     newSuperCategory: string;
@@ -2424,99 +2344,11 @@ export default function App() {
     showSystemLearn: boolean;
   } | null>(null);
 
-  const getAnalysisDateStr = (tx: Transaction) => {
-    if (analysisDateType === "booking") return tx.bookingDate || tx.date;
-    return tx.valueDate || tx.date;
-  };
-
-  const parseTxDate = (dateStr: string) => {
-    const parts = dateStr.split("-");
-    if (parts.length === 3) {
-      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    }
-    return new Date(dateStr);
-  };
-
-  const { monthlyStats, topSuperCategories } = useMemo(() => {
-    // Better way to handle current and prev month explicitly using local timezone
-    const nowLocal = new Date();
-    const currentMonthPrefix = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, "0")}`;
-    
-    // To get previous month without skipping days (e.g. March 31 -> Feb 28)
-    const prevDateLocal = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), 1);
-    prevDateLocal.setMonth(prevDateLocal.getMonth() - 1);
-    const prevMonthPrefix = `${prevDateLocal.getFullYear()}-${String(prevDateLocal.getMonth() + 1).padStart(2, "0")}`;
-
-    const txsByMonth: Record<
-      string,
-      { month: string; income: number; expense: number; count: number; savings: number }
-    > = {};
-    const superCatStats: Record<string, { current: number; previous: number }> = {};
-
-    transactions.forEach((t) => {
-      const parsedD = parseTxDate(getAnalysisDateStr(t));
-      const monthStr = `${parsedD.getFullYear()}-${String(parsedD.getMonth() + 1).padStart(2, "0")}`;
-
-      if (!txsByMonth[monthStr]) {
-        txsByMonth[monthStr] = {
-          month: monthStr,
-          income: 0,
-          expense: 0,
-          count: 0,
-          savings: 0,
-        };
-      }
-      if (t.category !== "Transferencias") {
-        if (t.amount > 0) txsByMonth[monthStr].income += t.amount;
-        else txsByMonth[monthStr].expense += Math.abs(t.amount);
-        txsByMonth[monthStr].count++;
-      }
-
-      if (
-        t.amount < 0 &&
-        t.category !== "Transferencias" &&
-        t.category !== "Aforro"
-      ) {
-        const sc = t.superCategory || t.category || "Sen clasificar";
-        if (!superCatStats[sc]) {
-          superCatStats[sc] = { current: 0, previous: 0 };
-        }
-
-        if (monthStr === currentMonthPrefix) {
-          superCatStats[sc].current += Math.abs(t.amount);
-        } else if (monthStr === prevMonthPrefix) {
-          superCatStats[sc].previous += Math.abs(t.amount);
-        }
-      }
-    });
-
-    for (const key of Object.keys(txsByMonth)) {
-      txsByMonth[key].savings = txsByMonth[key].income - txsByMonth[key].expense;
-    }
-
-    const monthsDesc = Object.keys(txsByMonth).sort((a, b) =>
-      b.localeCompare(a)
-    );
-    const stats = monthsDesc.map((m) => txsByMonth[m]).slice(0, 6);
-
-    const topSuperCats = Object.entries(superCatStats)
-      .filter(([_, stats]) => stats.current > 0 || stats.previous > 0)
-      .map(([name, stats]) => {
-        const change =
-          stats.previous === 0
-            ? null
-            : ((stats.current - stats.previous) / stats.previous) * 100;
-        return {
-          name,
-          current: stats.current,
-          previous: stats.previous,
-          change,
-        };
-      })
-      .sort((a, b) => b.current - a.current);
-
-    return { monthlyStats: stats, topSuperCategories: topSuperCats };
-  }, [transactions, analysisDateType]);
+  const [userPaydayStart, setUserPaydayStart] = useState<number | null>(null);
+  const [userPaydayEnd, setUserPaydayEnd] = useState<number | null>(null);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [tempPaydayStart, setTempPaydayStart] = useState<number>(28);
+  const [tempPaydayEnd, setTempPaydayEnd] = useState<number>(31);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -2525,6 +2357,15 @@ export default function App() {
         setLoadingTransactions(true);
         try {
           await createUserProfile();
+          const profile = await getUserProfile();
+          if (profile && profile.paydayStart) {
+            setUserPaydayStart(profile.paydayStart);
+            setTempPaydayStart(profile.paydayStart);
+          }
+          if (profile && profile.paydayEnd) {
+            setUserPaydayEnd(profile.paydayEnd);
+            setTempPaydayEnd(profile.paydayEnd);
+          }
         } catch (e) {
           // ignore
         }
@@ -2790,491 +2631,39 @@ export default function App() {
     );
   }
 
-  const nowForAnalysis = new Date();
-  const currentMonth = nowForAnalysis.getMonth();
-  const currentYear = nowForAnalysis.getFullYear();
-
-  const currentYearTransactions = transactions.filter((tx) => {
-    return new Date(getAnalysisDateStr(tx)).getFullYear() === currentYear;
-  });
-
-  const lastMonthTransactions = transactions.filter((tx) => {
-    const txDate = new Date(getAnalysisDateStr(tx));
-    return (
-      txDate.getMonth() === currentMonth && txDate.getFullYear() === currentYear
-    );
-  });
-
-  const last6MonthsTransactions = transactions.filter((tx) => {
-    const txDate = new Date(getAnalysisDateStr(tx));
-    const monthDiff =
-      (currentYear - txDate.getFullYear()) * 12 +
-      (currentMonth - txDate.getMonth());
-    return monthDiff >= 0 && monthDiff <= 5;
-  });
-
-  const getTotals = (txs: Transaction[]) => {
-    const incomes = txs
-      .filter((t) => t.amount > 0)
-      .reduce((acc, tx) => acc + Number(tx.amount), 0);
-    const expenses = Math.abs(
-      txs
-        .filter((t) => t.amount < 0)
-        .reduce((acc, tx) => acc + Number(tx.amount), 0),
-    );
-    return { incomes, expenses };
-  };
-
-  const currentYearTotals = getTotals(currentYearTransactions);
-  const last6MonthsTotals = getTotals(last6MonthsTransactions);
-  const lastMonthTotals = getTotals(lastMonthTransactions);
-  const allTimeTotals = getTotals(transactions);
-
-  const chartTxs =
-    chartTimeframe === "month"
-      ? lastMonthTransactions
-      : chartTimeframe === "6months"
-        ? last6MonthsTransactions
-        : currentYearTransactions;
-
-  let chartData: { name: string; ingresos: number; gastos: number }[] = [];
-
-  const getStartOfWeek = (d: Date) => {
-    const date = new Date(d);
-    date.setHours(0, 0, 0, 0);
-    const day = date.getDay() || 7;
-    if (day !== 1) date.setHours(-24 * (day - 1));
-    return date;
-  };
-
-  const getWeekName = (d: Date) => {
-    const start = getStartOfWeek(d);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
-    const formatter = new Intl.DateTimeFormat("gl-ES", {
-      day: "numeric",
-      month: "short",
-    });
-    return `${formatter.format(start)} - ${formatter.format(end)}`;
-  };
-
-  if (chartGranularity === "day") {
-    const dayMap: Record<
-      string,
-      { date: Date; name: string; ingresos: number; gastos: number }
-    > = {};
-    const formatter = new Intl.DateTimeFormat("gl-ES", {
-      day: "numeric",
-      month: "short",
-    });
-
-    // Add base days depending on timeframe
-    if (chartTimeframe === "month") {
-      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-      for (let i = 1; i <= daysInMonth; i++) {
-        const d = new Date(currentYear, currentMonth, i);
-        const key = d.toISOString().split("T")[0];
-        dayMap[key] = { date: d, name: String(i), ingresos: 0, gastos: 0 };
-      }
-    } else if (chartTimeframe === "6months") {
-      const startDate = new Date(currentYear, currentMonth - 5, 1);
-      const endDate = new Date(currentYear, currentMonth + 1, 0);
-      for (
-        let d = new Date(startDate);
-        d <= endDate;
-        d.setDate(d.getDate() + 1)
-      ) {
-        const key = d.toISOString().split("T")[0];
-        dayMap[key] = {
-          date: new Date(d),
-          name: formatter.format(d),
-          ingresos: 0,
-          gastos: 0,
-        };
-      }
-    } else if (chartTimeframe === "year") {
-      const startDate = new Date(currentYear, 0, 1);
-      const endDate = new Date(currentYear, currentMonth + 1, 0);
-      for (
-        let d = new Date(startDate);
-        d <= endDate;
-        d.setDate(d.getDate() + 1)
-      ) {
-        const key = d.toISOString().split("T")[0];
-        dayMap[key] = {
-          date: new Date(d),
-          name: formatter.format(d),
-          ingresos: 0,
-          gastos: 0,
-        };
-      }
-    }
-
-    chartTxs.forEach((tx) => {
-      const d = parseTxDate(getAnalysisDateStr(tx));
-      d.setHours(0, 0, 0, 0);
-      // we might need to adjust based on current year/month
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      if (!dayMap[key]) {
-        dayMap[key] = {
-          date: d,
-          name:
-            chartTimeframe === "month"
-              ? String(d.getDate())
-              : formatter.format(d),
-          ingresos: 0,
-          gastos: 0,
-        };
-      }
-      if (tx.amount > 0) dayMap[key].ingresos += Number(tx.amount);
-      else dayMap[key].gastos += Math.abs(Number(tx.amount));
-    });
-
-    chartData = Object.values(dayMap)
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
-      .map((d) => ({ name: d.name, ingresos: d.ingresos, gastos: d.gastos }));
-  } else if (chartGranularity === "week") {
-    const weekMap: Record<
-      string,
-      { date: Date; name: string; ingresos: number; gastos: number }
-    > = {};
-
-    if (chartTimeframe === "month") {
-      const startDate = new Date(currentYear, currentMonth, 1);
-      const endDate = new Date(currentYear, currentMonth + 1, 0);
-      for (
-        let d = new Date(startDate);
-        d <= endDate;
-        d.setDate(d.getDate() + 7)
-      ) {
-        const start = getStartOfWeek(d);
-        const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-        if (!weekMap[key]) {
-          weekMap[key] = {
-            date: start,
-            name: getWeekName(start),
-            ingresos: 0,
-            gastos: 0,
-          };
-        }
-      }
-    } else if (chartTimeframe === "6months") {
-      const startDate = new Date(currentYear, currentMonth - 5, 1);
-      const endDate = new Date(currentYear, currentMonth + 1, 0);
-      for (
-        let d = new Date(startDate);
-        d <= endDate;
-        d.setDate(d.getDate() + 7)
-      ) {
-        const start = getStartOfWeek(d);
-        const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-        if (!weekMap[key]) {
-          weekMap[key] = {
-            date: start,
-            name: getWeekName(start),
-            ingresos: 0,
-            gastos: 0,
-          };
-        }
-      }
-    } else if (chartTimeframe === "year") {
-      const startDate = new Date(currentYear, 0, 1);
-      const endDate = new Date(currentYear, currentMonth + 1, 0);
-      for (
-        let d = new Date(startDate);
-        d <= endDate;
-        d.setDate(d.getDate() + 7)
-      ) {
-        const start = getStartOfWeek(d);
-        const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-        if (!weekMap[key]) {
-          weekMap[key] = {
-            date: start,
-            name: getWeekName(start),
-            ingresos: 0,
-            gastos: 0,
-          };
-        }
-      }
-    }
-
-    chartTxs.forEach((tx) => {
-      const d = parseTxDate(getAnalysisDateStr(tx));
-      const start = getStartOfWeek(d);
-      const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-      if (!weekMap[key]) {
-        weekMap[key] = {
-          date: start,
-          name: getWeekName(start),
-          ingresos: 0,
-          gastos: 0,
-        };
-      }
-      if (tx.amount > 0) weekMap[key].ingresos += Number(tx.amount);
-      else weekMap[key].gastos += Math.abs(Number(tx.amount));
-    });
-
-    chartData = Object.values(weekMap)
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
-      .map((d) => ({ name: d.name, ingresos: d.ingresos, gastos: d.gastos }));
-  } else {
-    // group by month
-    const monthFormatter = new Intl.DateTimeFormat("gl-ES", { month: "short" });
-    const monthFormatterWithYear = new Intl.DateTimeFormat("gl-ES", {
-      month: "short",
-      year: "2-digit",
-    });
-    const monthMap: Record<
-      number,
-      { name: string; monthNum: number; ingresos: number; gastos: number }
-    > = {};
-
-    if (chartTimeframe === "month") {
-      const mNum = currentYear * 12 + currentMonth;
-      monthMap[mNum] = {
-        name: monthFormatter.format(new Date(currentYear, currentMonth, 1)),
-        monthNum: mNum,
-        ingresos: 0,
-        gastos: 0,
-      };
-    } else if (chartTimeframe === "6months") {
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date(currentYear, currentMonth - i, 1);
-        const mNum = d.getFullYear() * 12 + d.getMonth();
-        const name =
-          d.getFullYear() !== currentYear
-            ? monthFormatterWithYear.format(d)
-            : monthFormatter.format(d);
-        monthMap[mNum] = { name, monthNum: mNum, ingresos: 0, gastos: 0 };
-      }
-    } else if (chartTimeframe === "year") {
-      for (let i = 0; i <= currentMonth; i++) {
-        const d = new Date(currentYear, i, 1);
-        const mNum = d.getFullYear() * 12 + d.getMonth();
-        monthMap[mNum] = {
-          name: monthFormatter.format(d),
-          monthNum: mNum,
-          ingresos: 0,
-          gastos: 0,
-        };
-      }
-    }
-
-    chartTxs.forEach((tx) => {
-      const d = parseTxDate(getAnalysisDateStr(tx));
-      const mNum = d.getFullYear() * 12 + d.getMonth();
-
-      if (!monthMap[mNum]) {
-        const name =
-          d.getFullYear() !== currentYear
-            ? monthFormatterWithYear.format(d)
-            : monthFormatter.format(d);
-        monthMap[mNum] = { name, monthNum: mNum, ingresos: 0, gastos: 0 };
-      }
-
-      if (tx.amount > 0) monthMap[mNum].ingresos += Number(tx.amount);
-      else monthMap[mNum].gastos += Math.abs(Number(tx.amount));
-    });
-
-    chartData = Object.values(monthMap)
-      .sort((a, b) => a.monthNum - b.monthNum)
-      .map((d) => ({ name: d.name, ingresos: d.ingresos, gastos: d.gastos }));
-  }
-
-  const heatmapTxs =
-    heatmapTimeframe === "month"
-      ? lastMonthTransactions
-      : heatmapTimeframe === "6months"
-        ? last6MonthsTransactions
-        : currentYearTransactions;
-
-  // Category Chart Data
-  const catChartTxs =
-    catChartTimeframe === "month"
-      ? lastMonthTransactions
-      : catChartTimeframe === "6months"
-        ? last6MonthsTransactions
-        : catChartTimeframe === "year"
-          ? currentYearTransactions
-          : transactions;
-
-  interface ChartTreeNode {
-    id: string;
-    name: string;
-    displayName: string;
-    type: "superCategory" | "category" | "movement";
-    value: number;
-    children: Record<string, ChartTreeNode>;
-    level: number;
-  }
-
-  const rootNodes: Record<string, ChartTreeNode> = {};
-
-  catChartTxs.forEach((tx) => {
-    if (catChartType === "gastos" && tx.amount >= 0) return;
-    if (catChartType === "ingresos" && tx.amount <= 0) return;
-
-    const currentAmount = Number(tx.amount);
-    if (isNaN(currentAmount)) return;
-    const val = catChartType === "balance" ? currentAmount : Math.abs(currentAmount);
-
-    const sc = tx.superCategory || "Sen clasificación superior";
-    const c = tx.category || "Sen clasificar";
-    const mRaw = tx.name ? normalizeName(tx.name).toUpperCase() : "Descoñecido";
-    const m = mRaw || "Descoñecido";
-
-    if (catChartGrouping === "superCategory") {
-      const scId = `sc|||${sc}`;
-      if (!rootNodes[scId]) rootNodes[scId] = { id: scId, name: sc, displayName: sc, type: "superCategory", value: 0, children: {}, level: 0 };
-      rootNodes[scId].value += val;
-
-      const cId = `${scId}|||c|||${c}`;
-      if (!rootNodes[scId].children[cId]) rootNodes[scId].children[cId] = { id: cId, name: c, displayName: `  ↳ ${c}`, type: "category", value: 0, children: {}, level: 1 };
-      rootNodes[scId].children[cId].value += val;
-
-      const mId = `${cId}|||m|||${m}`;
-      if (!rootNodes[scId].children[cId].children[mId]) rootNodes[scId].children[cId].children[mId] = { id: mId, name: m, displayName: `    ↳ ${m}`, type: "movement", value: 0, children: {}, level: 2 };
-      rootNodes[scId].children[cId].children[mId].value += val;
-    } else if (catChartGrouping === "category") {
-      const cId = `c|||${c}`;
-      if (!rootNodes[cId]) rootNodes[cId] = { id: cId, name: c, displayName: c, type: "category", value: 0, children: {}, level: 0 };
-      rootNodes[cId].value += val;
-
-      const mId = `${cId}|||m|||${m}`;
-      if (!rootNodes[cId].children[mId]) rootNodes[cId].children[mId] = { id: mId, name: m, displayName: `  ↳ ${m}`, type: "movement", value: 0, children: {}, level: 1 };
-      rootNodes[cId].children[mId].value += val;
-    } else {
-      const mId = `m|||${m}`;
-      if (!rootNodes[mId]) rootNodes[mId] = { id: mId, name: m, displayName: m, type: "movement", value: 0, children: {}, level: 0 };
-      rootNodes[mId].value += val;
-    }
-  });
-
-  const flattenTree = (nodes: ChartTreeNode[], isExpanded: (id: string) => boolean): any[] => {
-    let result: any[] = [];
-    nodes.forEach(node => {
-      result.push(node);
-      if (isExpanded(node.id)) {
-        const children = Object.values(node.children).sort((a, b) => catChartSortOrder === "asc" ? a.value - b.value : b.value - a.value);
-        result = result.concat(flattenTree(children, isExpanded));
-      }
-    });
-    return result;
-  };
-
-  const rootNodesArray = Object.values(rootNodes).sort((a, b) => catChartSortOrder === "asc" ? a.value - b.value : b.value - a.value);
-  const catChartData = flattenTree(rootNodesArray, (id) => expandedChartNodes.has(id));
-
-  const handleChartBarClick = (data: any) => {
-    const node = data?.activePayload?.[0]?.payload || data?.payload || data;
-    if (!node || node.type === "movement" || !node.id) return;
-    setExpandedChartNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(node.id)) next.delete(node.id);
-      else next.add(node.id);
-      return next;
-    });
-  };
-
-  const heatmapData: Record<
-    number,
-    Record<number, { count: number; total: number }>
-  > = {};
-
-  heatmapTxs.forEach((tx) => {
-    const isGasto = tx.amount < 0;
-    if (heatmapMetric === "gastos" && !isGasto) return;
-    if (heatmapMetric === "ingresos" && isGasto) return;
-
-    const d = parseTxDate(getAnalysisDateStr(tx));
-    const monthKey = d.getFullYear() * 12 + d.getMonth();
-
-    let dayOfWeek = d.getDay();
-    if (dayOfWeek === 0) dayOfWeek = 7;
-
-    if (!heatmapData[monthKey]) heatmapData[monthKey] = {};
-    if (!heatmapData[monthKey][dayOfWeek])
-      heatmapData[monthKey][dayOfWeek] = { count: 0, total: 0 };
-
-    heatmapData[monthKey][dayOfWeek].count += 1;
-    const currentAmount = Number(tx.amount);
-    heatmapData[monthKey][dayOfWeek].total +=
-      heatmapMetric === "balance" ? currentAmount : Math.abs(currentAmount);
-  });
-
-  const heatmapMonthsToDisplay: number[] = [];
-  if (heatmapTimeframe === "month") {
-    heatmapMonthsToDisplay.push(currentYear * 12 + currentMonth);
-  } else if (heatmapTimeframe === "6months") {
-    for (let i = 5; i >= 0; i--) {
-      heatmapMonthsToDisplay.push(currentYear * 12 + currentMonth - i);
-    }
-  } else if (heatmapTimeframe === "year") {
-    for (let i = 0; i <= currentMonth; i++) {
-      heatmapMonthsToDisplay.push(currentYear * 12 + i);
-    }
-  }
-
-  let heatmapMaxVal = 0;
-  heatmapMonthsToDisplay.forEach((mKey) => {
-    for (let d = 1; d <= 7; d++) {
-      const cell = heatmapData[mKey]?.[d];
-      if (cell) {
-        const val =
-          heatmapValueType === "sum" ? cell.total : cell.total / cell.count;
-        if (Math.abs(val) > heatmapMaxVal) heatmapMaxVal = Math.abs(val);
-      }
-    }
-  });
-
-  const getHeatmapStyle = (val: number) => {
-    if (val === 0) return { backgroundColor: "#f8fafc" }; // slate-50
-    const intensity = Math.max(0.1, Math.abs(val) / heatmapMaxVal);
-    if (
-      heatmapMetric === "gastos" ||
-      (heatmapMetric === "balance" && val < 0)
-    ) {
-      const r = 239,
-        g = 68,
-        b = 68; // red-500
-      return {
-        backgroundColor: `rgba(${r}, ${g}, ${b}, ${0.1 + intensity * 0.9})`,
-      };
-    } else {
-      const r = 34,
-        g = 197,
-        b = 94; // green-500
-      return {
-        backgroundColor: `rgba(${r}, ${g}, ${b}, ${0.1 + intensity * 0.9})`,
-      };
+  const handleSaveSettings = async () => {
+    try {
+      await updateUserPaydayRange(tempPaydayStart, tempPaydayEnd);
+      setUserPaydayStart(tempPaydayStart);
+      setUserPaydayEnd(tempPaydayEnd);
+      setShowSettingsModal(false);
+    } catch (error) {
+      console.error("Error saving settings", error);
+      alert("Houbo un erro ao gardar a configuración.");
     }
   };
-
-  const dayNames = [
-    "Luns",
-    "Martes",
-    "Mércores",
-    "Xoves",
-    "Venres",
-    "Sábado",
-    "Domingo",
-  ];
-  const hmMonthFormatter = new Intl.DateTimeFormat("gl-ES", { month: "short" });
 
   return (
     <div className="min-h-screen p-4 sm:p-8 w-full max-w-7xl mx-auto space-y-8">
       <header className="text-center space-y-4 mt-8 mb-12 relative">
         {user && (
-          <div className="absolute top-0 right-0 flex items-center space-x-4">
+          <div className="absolute top-0 right-0 flex items-center space-x-2 sm:space-x-4">
             <span className="text-sm text-slate-500 hidden sm:inline-block">
               {user.email || user.phoneNumber || "User"}
             </span>
             <button
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center space-x-2 text-sm font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 sm:px-4 py-2 rounded-full transition-colors"
+            >
+              <Settings size={16} />
+              <span className="hidden sm:inline">Configuración</span>
+            </button>
+            <button
               onClick={logout}
-              className="flex items-center space-x-2 text-sm font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-full transition-colors"
+              className="flex items-center space-x-2 text-sm font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 sm:px-4 py-2 rounded-full transition-colors"
             >
               <LogOut size={16} />
-              <span>Saír</span>
+              <span className="hidden sm:inline">Saír</span>
             </button>
           </div>
         )}
@@ -3317,16 +2706,6 @@ export default function App() {
               Clasificacións
             </button>
             <button
-              onClick={() => setCurrentTab("analysis")}
-              className={`pb-4 text-sm font-bold transition-colors cursor-pointer ${
-                currentTab === "analysis"
-                  ? "border-b-2 border-slate-900 text-slate-900"
-                  : "text-slate-500 hover:text-slate-700 border-b-2 border-transparent"
-              }`}
-            >
-              Análise
-            </button>
-            <button
               onClick={() => setCurrentTab("insights")}
               className={`pb-4 text-sm font-bold transition-colors cursor-pointer flex items-center gap-2 ${
                 currentTab === "insights"
@@ -3359,648 +2738,7 @@ export default function App() {
           </div>
 
           {currentTab === "overview" && (
-            <Overview transactions={transactions} />
-          )}
-
-          {currentTab === "analysis" && (
-            <div className="space-y-6 pt-6">
-              <div className="grid grid-cols-1 gap-6">
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-center items-center text-center">
-                  <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-2">
-                    Cartos dispoñibles (Todos os tempos)
-                  </h2>
-                  <div className="text-4xl font-bold text-slate-900">
-                    {new Intl.NumberFormat("gl-ES", {
-                      style: "currency",
-                      currency: "EUR",
-                    }).format(
-                      transactions.reduce((acc, tx) => acc + tx.amount, 0),
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Ingresos Card */}
-                  <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-4">
-                    <div className="border-b border-slate-100 pb-4">
-                      <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-2">
-                        Ingresos Totais
-                      </h2>
-                      <div className="text-3xl font-bold text-green-600">
-                        {new Intl.NumberFormat("gl-ES", {
-                          style: "currency",
-                          currency: "EUR",
-                        }).format(allTimeTotals.incomes)}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                      <div className="bg-green-50 p-4 rounded-2xl flex flex-col justify-center min-w-0">
-                        <span className="text-xs font-medium text-slate-500 mb-1 truncate">
-                          Mes actual
-                        </span>
-                        <span className="text-base lg:text-lg font-bold text-green-700 break-words">
-                          {new Intl.NumberFormat("gl-ES", {
-                            style: "currency",
-                            currency: "EUR",
-                          }).format(lastMonthTotals.incomes)}
-                        </span>
-                      </div>
-                      <div className="bg-green-50 p-4 rounded-2xl flex flex-col justify-center min-w-0">
-                        <span className="text-xs font-medium text-slate-500 mb-1 truncate">
-                          Anteriores 6 meses
-                        </span>
-                        <span className="text-base lg:text-lg font-bold text-green-700 break-words">
-                          {new Intl.NumberFormat("gl-ES", {
-                            style: "currency",
-                            currency: "EUR",
-                          }).format(last6MonthsTotals.incomes)}
-                        </span>
-                      </div>
-                      <div className="bg-green-50 p-4 rounded-2xl flex flex-col justify-center min-w-0">
-                        <span className="text-xs font-medium text-slate-500 mb-1 truncate">
-                          Este ano
-                        </span>
-                        <span className="text-base lg:text-lg font-bold text-green-700 break-words">
-                          {new Intl.NumberFormat("gl-ES", {
-                            style: "currency",
-                            currency: "EUR",
-                          }).format(currentYearTotals.incomes)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Gastos Card */}
-                  <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-4">
-                    <div className="border-b border-slate-100 pb-4">
-                      <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-2">
-                        Gastos Totais
-                      </h2>
-                      <div className="text-3xl font-bold text-red-600">
-                        {new Intl.NumberFormat("gl-ES", {
-                          style: "currency",
-                          currency: "EUR",
-                        }).format(allTimeTotals.expenses)}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                      <div className="bg-red-50 p-4 rounded-2xl flex flex-col justify-center min-w-0">
-                        <span className="text-xs font-medium text-slate-500 mb-1 truncate">
-                          Mes actual
-                        </span>
-                        <span className="text-base lg:text-lg font-bold text-red-700 break-words">
-                          {new Intl.NumberFormat("gl-ES", {
-                            style: "currency",
-                            currency: "EUR",
-                          }).format(lastMonthTotals.expenses)}
-                        </span>
-                      </div>
-                      <div className="bg-red-50 p-4 rounded-2xl flex flex-col justify-center min-w-0">
-                        <span className="text-xs font-medium text-slate-500 mb-1 truncate">
-                          Anteriores 6 meses
-                        </span>
-                        <span className="text-base lg:text-lg font-bold text-red-700 break-words">
-                          {new Intl.NumberFormat("gl-ES", {
-                            style: "currency",
-                            currency: "EUR",
-                          }).format(last6MonthsTotals.expenses)}
-                        </span>
-                      </div>
-                      <div className="bg-red-50 p-4 rounded-2xl flex flex-col justify-center min-w-0">
-                        <span className="text-xs font-medium text-slate-500 mb-1 truncate">
-                          Este ano
-                        </span>
-                        <span className="text-base lg:text-lg font-bold text-red-700 break-words">
-                          {new Intl.NumberFormat("gl-ES", {
-                            style: "currency",
-                            currency: "EUR",
-                          }).format(currentYearTotals.expenses)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-6">
-                  <h2 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
-                    <PiggyBank className="text-blue-500" size={24} /> Rendemento e Consumo Mensual (Últimos 6 meses)
-                  </h2>
-                  {monthlyStats.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                      {monthlyStats.map((stat, i) => (
-                        <div key={i} className="flex flex-col p-4 bg-slate-50 border border-slate-100 shadow-sm rounded-2xl">
-                          <div className="flex justify-between items-center mb-3">
-                            <span className="font-bold text-slate-800 uppercase tracking-wider text-xs">{stat.month}</span>
-                            <span className={`font-black text-sm ${stat.savings >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                              {stat.savings >= 0 ? '+' : ''}{stat.savings.toFixed(2)} €
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs font-medium border-t border-slate-200/60 pt-2">
-                            <div className="flex items-center gap-1 text-green-700">
-                              <ArrowDownRight size={14} /> {stat.income.toFixed(0)} €
-                            </div>
-                            <div className="flex items-center gap-1 text-red-600">
-                              <ArrowUpRight size={14} /> {stat.expense.toFixed(0)} €
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm text-slate-500 text-sm flex items-center gap-3">
-                      <Info size={20} className="text-slate-400" /> Non hai datos mensuais dispoñibles.
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-6">
-                  <h2 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
-                    <BarChart2 className="text-indigo-500" size={24} /> Análise por Supercategorías (Este mes vs Anterior)
-                  </h2>
-                  {topSuperCategories.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                      {topSuperCategories.map((cat, i) => (
-                        <div key={i} className="p-5 bg-slate-50 border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                          <h4 className="font-bold text-slate-800 mb-3 truncate" title={cat.name}>{cat.name}</h4>
-                          
-                          <div className="flex items-end justify-between mb-2">
-                            <div>
-                              <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">Este mes</div>
-                              <div className="text-xl font-black text-slate-900">{cat.current.toFixed(2)} €</div>
-                            </div>
-                            
-                            {cat.change !== null && cat.change !== 0 && (
-                              <div className={`flex items-center text-xs font-bold px-2 py-1 rounded-full ${cat.change > 0 ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
-                                {cat.change > 0 ? <TrendingUp size={12} className="mr-1" /> : <TrendingDown size={12} className="mr-1" />}
-                                {Math.abs(cat.change).toFixed(1)}%
-                              </div>
-                            )}
-                          </div>
-                          
-                          <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200">
-                             <span className="text-xs text-slate-500 font-medium">Mes anterior</span>
-                             <span className="text-sm font-semibold text-slate-600">{cat.previous.toFixed(2)} €</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm text-slate-500 text-sm flex items-center gap-3">
-                      <Info size={20} className="text-slate-400" /> Non hai datos de gastos dispoñibles para este período.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-6">
-                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center space-y-4 xl:space-y-0">
-                  <h2 className="text-xl font-bold tracking-tight text-slate-900">
-                    Evolución
-                  </h2>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setAnalysisDateType("operation")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${analysisDateType === "operation" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Operación
-                      </button>
-                      <button
-                        onClick={() => setAnalysisDateType("booking")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${analysisDateType === "booking" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Asentamento
-                      </button>
-                    </div>
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setChartTimeframe("year")}
-                        className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${chartTimeframe === "year" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Este ano
-                      </button>
-                      <button
-                        onClick={() => setChartTimeframe("6months")}
-                        className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${chartTimeframe === "6months" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        6 meses
-                      </button>
-                      <button
-                        onClick={() => setChartTimeframe("month")}
-                        className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${chartTimeframe === "month" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Mes actual
-                      </button>
-                    </div>
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setChartGranularity("month")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${chartGranularity === "month" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                        title="Agrupar por meses"
-                      >
-                        Mes
-                      </button>
-                      <button
-                        onClick={() => setChartGranularity("week")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${chartGranularity === "week" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                        title="Agrupar por semanas"
-                      >
-                        Semana
-                      </button>
-                      <button
-                        onClick={() => setChartGranularity("day")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${chartGranularity === "day" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                        title="Agrupar por días"
-                      >
-                        Día
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="h-[400px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={chartData}
-                      margin={{ top: 10, right: 10, left: 20, bottom: 0 }}
-                    >
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        vertical={false}
-                        stroke="#E2E8F0"
-                      />
-                      <XAxis
-                        dataKey="name"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: "#64748B", fontSize: 12 }}
-                        dy={10}
-                      />
-                      <YAxis
-                        width={80}
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: "#64748B", fontSize: 12 }}
-                        tickFormatter={(value) =>
-                          `${new Intl.NumberFormat("gl-ES", { maximumFractionDigits: 0 }).format(value)} €`
-                        }
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          borderRadius: "1rem",
-                          border: "1px solid #E2E8F0",
-                          boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                        }}
-                        formatter={(value: any) => [
-                          `${Number(value).toFixed(2)} €`,
-                          "",
-                        ]}
-                        labelStyle={{
-                          fontWeight: "bold",
-                          color: "#0F172A",
-                          marginBottom: "0.25rem",
-                        }}
-                      />
-                      <Legend
-                        iconType="circle"
-                        wrapperStyle={{ paddingTop: "1rem" }}
-                      />
-                      <Line
-                        type="monotone"
-                        name="Ingresos"
-                        dataKey="ingresos"
-                        stroke="#16A34A"
-                        strokeWidth={3}
-                        dot={{ r: 4, strokeWidth: 2 }}
-                        activeDot={{ r: 6 }}
-                      />
-                      <Line
-                        type="monotone"
-                        name="Gastos"
-                        dataKey="gastos"
-                        stroke="#DC2626"
-                        strokeWidth={3}
-                        dot={{ r: 4, strokeWidth: 2 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-6 mt-8">
-                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center space-y-4 xl:space-y-0">
-                  <h2 className="text-xl font-bold tracking-tight text-slate-900">
-                    Mapa de calor
-                  </h2>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setAnalysisDateType("operation")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${analysisDateType === "operation" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Operación
-                      </button>
-                      <button
-                        onClick={() => setAnalysisDateType("booking")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${analysisDateType === "booking" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Asentamento
-                      </button>
-                    </div>
-
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setHeatmapMetric("gastos")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapMetric === "gastos" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Gastos
-                      </button>
-                      <button
-                        onClick={() => setHeatmapMetric("ingresos")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapMetric === "ingresos" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Ingresos
-                      </button>
-                      <button
-                        onClick={() => setHeatmapMetric("balance")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapMetric === "balance" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Balance
-                      </button>
-                    </div>
-
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setHeatmapValueType("sum")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapValueType === "sum" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                        title="Suma dos movementos"
-                      >
-                        Suma
-                      </button>
-                      <button
-                        onClick={() => setHeatmapValueType("avg")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapValueType === "avg" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                        title="Media dos movementos"
-                      >
-                        Media
-                      </button>
-                    </div>
-
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setHeatmapTimeframe("year")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapTimeframe === "year" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Ano
-                      </button>
-                      <button
-                        onClick={() => setHeatmapTimeframe("6months")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapTimeframe === "6months" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        6m
-                      </button>
-                      <button
-                        onClick={() => setHeatmapTimeframe("month")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${heatmapTimeframe === "month" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Mes
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto pb-4">
-                  <div className="min-w-[600px]">
-                    <div className="grid grid-cols-[80px_repeat(7,1fr)] gap-2 mb-2">
-                      <div></div>
-                      {dayNames.map((d) => (
-                        <div
-                          key={d}
-                          className="text-center text-xs font-semibold text-slate-500"
-                        >
-                          {d}
-                        </div>
-                      ))}
-                    </div>
-                    {heatmapMonthsToDisplay.map((mKey) => {
-                      const d = new Date();
-                      d.setFullYear(Math.floor(mKey / 12));
-                      d.setMonth(mKey % 12);
-                      const mName = hmMonthFormatter.format(d);
-                      return (
-                        <div
-                          key={mKey}
-                          className="grid grid-cols-[80px_repeat(7,1fr)] gap-2 mb-2 items-center"
-                        >
-                          <div className="text-sm font-medium text-slate-700 text-right pr-4 capitalize">
-                            {mName}
-                          </div>
-                          {[1, 2, 3, 4, 5, 6, 7].map((day) => {
-                            const cell = heatmapData[mKey]?.[day];
-                            const val = cell
-                              ? heatmapValueType === "sum"
-                                ? cell.total
-                                : cell.total / cell.count
-                              : 0;
-                            const formattedVal = new Intl.NumberFormat(
-                              "gl-ES",
-                              { style: "currency", currency: "EUR" },
-                            ).format(val);
-                            const count = cell ? cell.count : 0;
-                            return (
-                              <div
-                                key={day}
-                                className="h-12 rounded-md transition-all duration-300 hover:scale-[1.02] cursor-pointer flex items-center justify-center border border-black/5"
-                                style={getHeatmapStyle(val)}
-                                title={`${mName} - ${dayNames[day - 1]}: ${formattedVal} (${count} movementos)`}
-                              >
-                                {val !== 0 && (
-                                  <span className="text-[10.5px] font-medium text-black/70 mix-blend-multiply">
-                                    {Math.round(val)}€
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-6 mt-8">
-                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center space-y-4 xl:space-y-0">
-                  <h2 className="text-xl font-bold tracking-tight text-slate-900">
-                    Análise de Categorías
-                  </h2>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setCatChartType("gastos")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${catChartType === "gastos" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Gastos
-                      </button>
-                      <button
-                        onClick={() => setCatChartType("ingresos")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${catChartType === "ingresos" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Ingresos
-                      </button>
-                      <button
-                        onClick={() => setCatChartType("balance")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${catChartType === "balance" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Balance
-                      </button>
-                    </div>
-
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setCatChartGrouping("superCategory")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${catChartGrouping === "superCategory" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Supercategoría
-                      </button>
-                      <button
-                        onClick={() => setCatChartGrouping("category")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${catChartGrouping === "category" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Categoría
-                      </button>
-                      <button
-                        onClick={() => setCatChartGrouping("movement")}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${catChartGrouping === "movement" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Movementos
-                      </button>
-                    </div>
-
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setCatChartSortOrder("desc")}
-                        title="Maior a menor"
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer w-8 flex items-center justify-center ${catChartSortOrder === "desc" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        onClick={() => setCatChartSortOrder("asc")}
-                        title="Menor a maior"
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer w-8 flex items-center justify-center ${catChartSortOrder === "asc" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        ↑
-                      </button>
-                    </div>
-
-                    <div className="flex bg-slate-50 p-1 rounded-full border border-slate-100">
-                      <button
-                        onClick={() => setCatChartTimeframe("all")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${catChartTimeframe === "all" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Todos
-                      </button>
-                      <button
-                        onClick={() => setCatChartTimeframe("year")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${catChartTimeframe === "year" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Ano
-                      </button>
-                      <button
-                        onClick={() => setCatChartTimeframe("6months")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${catChartTimeframe === "6months" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        6m
-                      </button>
-                      <button
-                        onClick={() => setCatChartTimeframe("month")}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${catChartTimeframe === "month" ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        Mes
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="h-[500px] w-full overflow-y-auto overflow-x-hidden pr-2">
-                  <div
-                    style={{
-                      height: `${Math.max(500, catChartData.length * 40)}px`,
-                    }}
-                    className="w-full"
-                  >
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={catChartData}
-                        layout="vertical"
-                        margin={{ top: 10, right: 80, left: 50, bottom: 0 }}
-                      >
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          horizontal={true}
-                          vertical={false}
-                          stroke="#E2E8F0"
-                        />
-                        <XAxis
-                          type="number"
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fill: "#64748B", fontSize: 12 }}
-                          tickFormatter={(value) =>
-                            `${new Intl.NumberFormat("gl-ES", { maximumFractionDigits: 0 }).format(value)} €`
-                          }
-                        />
-                        <YAxis
-                          type="category"
-                          width={180}
-                          dataKey="displayName"
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fill: "#64748B", fontSize: 12 }}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            borderRadius: "1rem",
-                            border: "1px solid #E2E8F0",
-                            boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                          }}
-                          formatter={(value: any) => [
-                            `${Number(value).toFixed(2)} €`,
-                            catChartType === "gastos" ? "Gastos" : catChartType === "ingresos" ? "Ingresos" : "Balance",
-                          ]}
-                          labelFormatter={(label: any) => String(label).replace(/^[ ↳]+/, '')}
-                          labelStyle={{
-                            fontWeight: "bold",
-                            color: "#0F172A",
-                            marginBottom: "0.25rem",
-                          }}
-                        />
-                        <Bar
-                          dataKey="value"
-                          onClick={(data) => handleChartBarClick(data)}
-                          cursor={catChartGrouping !== 'movement' ? 'pointer' : 'default'}
-                          fill={
-                            catChartType === "gastos" ? "#DC2626" : catChartType === "ingresos" ? "#16A34A" : "#3B82F6"
-                          }
-                          radius={[0, 4, 4, 0]}
-                          barSize={24}
-                          label={{ 
-                            position: 'right', 
-                            fill: '#64748B', 
-                            fontSize: 12, 
-                            fontWeight: 500,
-                            formatter: (value: any) => `${new Intl.NumberFormat('gl-ES', { maximumFractionDigits: 0 }).format(value)} €`
-                          }}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <Overview transactions={transactions} userPaydayStart={userPaydayStart} userPaydayEnd={userPaydayEnd} />
           )}
 
           {currentTab === "movements" && transactions.length === 0 && (
@@ -4406,6 +3144,65 @@ export default function App() {
               <button
                 onClick={() => setSuperCategoryUpdateDialog(null)}
                 className="flex-1 bg-white text-slate-700 rounded-xl py-3 font-medium border border-slate-200 hover:bg-slate-50 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl relative animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-center w-12 h-12 bg-slate-100 rounded-full mb-4 mx-auto text-slate-600">
+              <Settings size={24} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 mb-2 text-center">Configuración</h3>
+            <p className="text-slate-500 text-sm mb-6 text-center">
+              Personaliza a túa experiencia.
+            </p>
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Días de cobro da nómina (rango)
+                </label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={tempPaydayStart}
+                    onChange={(e) => setTempPaydayStart(Number(e.target.value))}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-shadow text-slate-900"
+                    placeholder="Día de inicio"
+                  />
+                  <span className="text-slate-500">ao</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={tempPaydayEnd}
+                    onChange={(e) => setTempPaydayEnd(Number(e.target.value))}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-shadow text-slate-900"
+                    placeholder="Día de fin"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  Usarase este rango como período do mes para calcular a túa radiografía (ex: do 28 ao 31).
+                </p>
+              </div>
+            </div>
+            <div className="flex space-x-4">
+              <button
+                onClick={handleSaveSettings}
+                className="flex-1 bg-slate-900 text-white rounded-xl py-3 font-medium hover:bg-slate-800 transition-colors flex justify-center flex-row items-center cursor-pointer gap-2"
+              >
+                Gardar
+              </button>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="flex-1 bg-white text-slate-700 rounded-xl py-3 font-medium border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
