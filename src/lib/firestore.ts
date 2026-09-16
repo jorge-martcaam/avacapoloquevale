@@ -12,6 +12,7 @@ import {
   deleteField,
   updateDoc,
   arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
 
@@ -215,7 +216,7 @@ export async function saveTransactionsToFirestore(
         data.name &&
         data.category &&
         data.category !== "Outros" &&
-        data.category !== "📦 Outros"
+        data.category !== "Outros"
       ) {
         categoryMap[normalizeName(data.name)] = {
           category: data.category,
@@ -282,7 +283,7 @@ export async function saveTransactionsToFirestore(
         dataToWrite.mccDescription = String(t.mccDescription);
       }
 
-      const finalCategory = learned?.category || t.category || "📦 Outros";
+      const finalCategory = learned?.category || t.category || "Outros";
       if (finalCategory) {
         dataToWrite.category = String(finalCategory);
       }
@@ -640,7 +641,7 @@ export async function autoClassifyCurrentTransactions() {
         data.name &&
         data.category &&
         data.category !== "Outros" &&
-        data.category !== "📦 Outros"
+        data.category !== "Outros"
       ) {
         categoryMap[normalizeName(data.name)] = {
           category: data.category,
@@ -831,5 +832,89 @@ export async function updateUserPaydayRange(paydayStart: number, paydayEnd: numb
     await setDoc(doc(db, path), { paydayStart, paydayEnd }, { merge: true });
   } catch (error) {
     console.error("Error updating user payday", error);
+  }
+}
+
+export async function addCustomCategory(category: string, superCategory: string) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `users/${user.uid}`;
+  try {
+    await setDoc(doc(db, path), { 
+      customCategoriesMap: { [category]: superCategory } 
+    }, { merge: true });
+  } catch (error) {
+    console.error("Error adding custom category", error);
+  }
+}
+
+export async function addCustomSuperCategory(superCategory: string) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `users/${user.uid}`;
+  try {
+    await setDoc(doc(db, path), { 
+      customSuperCategories: arrayUnion(superCategory) 
+    }, { merge: true });
+  } catch (error) {
+    console.error("Error adding custom supercategory", error);
+  }
+}
+
+export async function removeCustomCategory(category: string) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `users/${user.uid}`;
+  try {
+    const docRef = doc(db, path);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return;
+    const data = snap.data();
+    if (data.customCategoriesMap && data.customCategoriesMap[category]) {
+      const updatedMap = { ...data.customCategoriesMap };
+      delete updatedMap[category];
+      await updateDoc(docRef, { customCategoriesMap: updatedMap });
+    }
+  } catch (error) {
+    console.error("Error removing custom category", error);
+  }
+}
+
+export async function removeCustomSuperCategory(superCategory: string) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `users/${user.uid}`;
+  try {
+    await updateDoc(doc(db, path), { 
+      customSuperCategories: arrayRemove(superCategory) 
+    });
+  } catch (error) {
+    console.error("Error removing custom supercategory", error);
+  }
+}
+
+export async function hideCategory(category: string) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `users/${user.uid}`;
+  try {
+    await setDoc(doc(db, path), { 
+      hiddenCategories: arrayUnion(category) 
+    }, { merge: true });
+  } catch (error) {
+    console.error("Error hiding category", error);
+  }
+}
+
+export async function hideSuperCategory(superCategory: string) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `users/${user.uid}`;
+  try {
+    await setDoc(doc(db, path), { 
+      hiddenSuperCategories: arrayUnion(superCategory) 
+    }, { merge: true });
+  } catch (error) {
+    console.error("Error hiding supercategory", error);
   }
 }

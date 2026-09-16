@@ -19,7 +19,9 @@ service cloud.firestore {
              ( !('createdAt' in data) || data.createdAt is timestamp ) &&
              ( !('dismissedAlerts' in data) || (data.dismissedAlerts is list && data.dismissedAlerts.size() <= 200) ) &&
              ( !('paydayStart' in data) || data.paydayStart is number ) &&
-             ( !('paydayEnd' in data) || data.paydayEnd is number );
+             ( !('paydayEnd' in data) || data.paydayEnd is number ) &&
+             ( !('customCategoriesMap' in data) || data.customCategoriesMap is map ) &&
+             ( !('customSuperCategories' in data) || data.customSuperCategories is list );
     }
 
     function isValidAccount(data, userId) {
@@ -63,9 +65,9 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
       allow list: if false; // Users shouldn't be listed
-      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming(), userId) && incoming().keys().size() <= 5;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming(), userId) && incoming().keys().size() <= 7;
       allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming(), userId) &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['dismissedAlerts', 'paydayStart', 'paydayEnd']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['dismissedAlerts', 'paydayStart', 'paydayEnd', 'customCategoriesMap', 'customSuperCategories']);
       allow delete: if isOwner(userId) && isValidId(userId);
 
       match /accounts/{accountId} {

@@ -8,7 +8,7 @@ import {
   ChevronDown,
   Calendar,
   Search,
-  Bell,
+ 
   Settings,
 } from "lucide-react";
 import { auth, logout } from "./lib/firebase";
@@ -38,53 +38,53 @@ import {
 } from "./lib/firestore";
 import AuthScreen from "./components/AuthScreen";
 import { Overview } from "./Overview";
+import { CategoriesManager } from "./CategoriesManager";
 
-import { InsightsManager } from "./InsightsManager";
 
-const PREDEFINED_CATEGORIES = [
-  "💼 Nómina / Pensión",
-  "💸 Transferencias recibidas",
-  "🔁 Devolucións",
-  "➕ Outros ingresos",
-  "🏠 Aluguer / Hipoteca",
-  "🏘️ Comunidade",
-  "💡 Subministracións (Luz, Gas, Auga)",
-  "🌐 Internet e Teléfono",
-  "🛡️ Seguros (Fogar, Vida)",
-  "🔧 Mantemento e Compras do fogar",
-  "🛒 Supermercado",
-  "🥖 Pequeno comercio",
-  "⛽ Combustible",
-  "🚌 Transporte público",
-  "🔧 Taller e Mantemento",
-  "🅿️ Peaxes e Aparcadoiro",
-  "💊 Farmacia",
-  "⚕️ Saúde e Médicos",
-  "🏋️ Deporte e Ximnasio",
-  "💅 Estética e Peiteado",
-  "🍽️ Restaurantes e Bares",
-  "👕 Roupa e Complementos",
-  "📱 Subscricións",
-  "✈️ Viaxes e Aloxamento",
-  "🎭 Cultura e Espectáculos",
-  "🏦 Comisións bancarias",
-  "🏛️ Impostos e Taxas",
-  "📝 Multas ou Sancións",
-  "🐷 Aforro",
-  "📈 Investimentos",
-  "💸 Bizum (Gastos)",
-  "💳 Retirada de efectivo",
+export const PREDEFINED_CATEGORIES = [
+  "Nómina / Pensión",
+  "Transferencias recibidas",
+  "Devolucións",
+  "Aluguer / Hipoteca",
+  "Comunidade",
+  "Subministracións (Luz, Gas, Auga)",
+  "Internet e Teléfono",
+  "Seguros",
+  "Mantemento e Compras do fogar",
+  "Supermercado",
+  "Pequeno comercio",
+  "Combustible",
+  "Transporte público",
+  "Taller e Vehículo",
+  "Peaxes e Aparcadoiro",
+  "Farmacia",
+  "Saúde e Médicos",
+  "Deporte e Ximnasio",
+  "Estética e Peiteado",
+  "Restaurantes e Bares",
+  "Roupa e Complementos",
+  "Subscricións",
+  "Viaxes e Aloxamento",
+  "Cultura e Espectáculos",
+  "Comisións bancarias",
+  "Impostos e Taxas",
+  "Multas ou Sancións",
+  "Aforro",
+  "Investimentos",
+  "Bizum",
+  "Retirada de efectivo",
+  "Outros",
 ];
 
-const PREDEFINED_SUPERCATEGORIES = [
-  "📥 Ingresos",
-  "🏠 Fogar e Vivenda",
-  "🛒 Alimentación",
-  "🚗 Transporte",
-  "⚕️ Saúde e Coidado Persoal",
-  "🎉 Ocio e Tempo Libre",
-  "🏦 Obrigas e Gastos Financeiros",
-  "📈 Aforro e Investimento",
+export const PREDEFINED_SUPERCATEGORIES = [
+  "Ingresos",
+  "Fogar e Vivenda",
+  "Alimentación",
+  "Transporte",
+  "Saúde e Coidado Persoal",
+  "Ocio e Tempo Libre",
+  "Obrigas e Gastos Financeiros",
+  "Aforro e Investimento",
 ];
 
 export const getBankNameFromIBAN = (iban: string) => {
@@ -633,6 +633,7 @@ function EnableBankingConnectButton({
             <option value="">Selecciona o teu banco...</option>
             {aspsps
               .filter((a) => a.country === "ES")
+              .sort((a, b) => a.name.localeCompare(b.name, 'gl'))
               .map((aspsp, i) => (
                 <option key={i} value={aspsp.name}>
                   {aspsp.name}
@@ -1132,1187 +1133,6 @@ function MonthGroup({
   );
 }
 
-function CategoriesManager({
-  transactions,
-  availableCategories,
-  setTransactions,
-  onUpdateCategory,
-}: {
-  transactions: Transaction[];
-  availableCategories: string[];
-  setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
-  onUpdateCategory: (txId: string, newCategory: string) => Promise<void>;
-}) {
-  const [editingCategory, setEditingCategory] = useState<string | null>(null);
-  const [editVal, setEditVal] = useState("");
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(),
-  );
-  const [collapsedSuperCats, setCollapsedSuperCats] = useState<Set<string>>(
-    new Set(),
-  );
-  const [sortBy, setSortBy] = useState<"alpha" | "count" | "amount">("alpha");
-
-  // States for single tx classification
-  const [editingTxId, setEditingTxId] = useState<string | null>(null);
-  const [editTxCategoryVal, setEditTxCategoryVal] = useState<string>("");
-  const [showTxSuggestions, setShowTxSuggestions] = useState(false);
-
-  // States for superCategory edit
-  const [editingSuperCatFor, setEditingSuperCatFor] = useState<string | null>(
-    null,
-  );
-  const [superCatEditVal, setSuperCatEditVal] = useState("");
-
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // States for bulk editing
-  const [isBulkEdit, setIsBulkEdit] = useState(false);
-  const [selectedTxNames, setSelectedTxNames] = useState<Set<string>>(
-    new Set(),
-  );
-  const [bulkCategory, setBulkCategory] = useState("");
-  const [bulkSuperCategory, setBulkSuperCategory] = useState("");
-  const [bulkSaving, setBulkSaving] = useState(false);
-  const [bulkSortBy, setBulkSortBy] = useState<
-    "count" | "name" | "superCategory" | "category"
-  >("count");
-  const [bulkSortOrder, setBulkSortOrder] = useState<"asc" | "desc">("desc");
-  const [bulkCatFilter, setBulkCatFilter] = useState<
-    "all" | "with" | "without"
-  >("all");
-  const [bulkSuperCatFilter, setBulkSuperCatFilter] = useState<
-    "all" | "with" | "without"
-  >("all");
-
-  const [showResetRulesModal, setShowResetRulesModal] = useState(false);
-  const [resetExistingTransactions, setResetExistingTransactions] =
-    useState(false);
-  const [isDeletingRules, setIsDeletingRules] = useState(false);
-  const [isAutoClassifying, setIsAutoClassifying] = useState(false);
-  const [resetRulesMessage, setResetRulesMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
-
-  const handleAutoClassify = async () => {
-    setIsAutoClassifying(true);
-    try {
-      const updatedCount = await autoClassifyCurrentTransactions();
-
-      // Reload transactions to match DB state
-      const reloadedTxs = await getTransactionsFromFirestore();
-      setTransactions(reloadedTxs);
-
-      if (updatedCount && updatedCount > 0) {
-        alert(
-          `Auto-clasificación completada. Actualizáronse ${updatedCount} movementos.`,
-        );
-      } else {
-        alert(
-          "Non se atoparon movementos novos para auto-clasificar coas regras actuais. Recorda que primeiro tes que clasificar e gardar regras para que isto funcione.",
-        );
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Houbo un erro ao auto-clasificar os movementos.");
-    } finally {
-      setIsAutoClassifying(false);
-    }
-  };
-
-  const executeClearLearnedRules = async () => {
-    setIsDeletingRules(true);
-    setResetRulesMessage(null);
-    try {
-      await deleteAllLearnedCategories();
-
-      if (resetExistingTransactions) {
-        await resetAllTransactionCategories();
-
-        // Also update local state
-        setTransactions((prev) =>
-          prev.map((t) => ({
-            ...t,
-            category: undefined,
-            superCategory: undefined,
-          })),
-        );
-      }
-
-      setResetRulesMessage({
-        type: "success",
-        text: "As regras foron eliminadas correctamente.",
-      });
-      setTimeout(() => {
-        setResetRulesMessage(null);
-        setShowResetRulesModal(false);
-      }, 3000);
-    } catch (e) {
-      console.error(e);
-      setResetRulesMessage({
-        type: "error",
-        text: "Houbo un erro ao intentar eliminar as regras.",
-      });
-    } finally {
-      setIsDeletingRules(false);
-    }
-  };
-
-  const handleBulkSave = async () => {
-    if (selectedTxNames.size === 0) return;
-    setBulkSaving(true);
-    try {
-      const namesArray = Array.from(selectedTxNames);
-
-      // Update the DB
-      await bulkUpdateTransactionsByNames(
-        namesArray,
-        bulkCategory,
-        bulkSuperCategory,
-      );
-
-      // For each name, also learn the category for the future
-      if (bulkCategory || bulkSuperCategory) {
-        for (const name of namesArray) {
-          await learnCategory(name, bulkCategory, bulkSuperCategory);
-        }
-      }
-
-      // Update local state
-      setTransactions((prev) =>
-        prev.map((t) => {
-          if (selectedTxNames.has(t.name)) {
-            const updated = { ...t };
-            if (bulkCategory) updated.category = bulkCategory;
-            if (bulkSuperCategory) updated.superCategory = bulkSuperCategory;
-            return updated;
-          }
-          return t;
-        }),
-      );
-
-      // Reset
-      setSelectedTxNames(new Set());
-      setBulkCategory("");
-      setBulkSuperCategory("");
-      setIsBulkEdit(false);
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao aplicar as clasificacións masivas");
-    } finally {
-      setBulkSaving(false);
-    }
-  };
-
-  const handleEditTxClick = (tx: Transaction, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingTxId(tx.transaction_id);
-    setEditTxCategoryVal(tx.category || "");
-    setShowTxSuggestions(true);
-  };
-
-  const handleSaveTx = async (txId: string) => {
-    await onUpdateCategory(txId, editTxCategoryVal);
-    setEditingTxId(null);
-    setShowTxSuggestions(false);
-  };
-
-
-  const handleSaveSuperCat = async (category: string, oldSuperCat: string) => {
-    if (superCatEditVal.trim() !== oldSuperCat) {
-      const newSuper = superCatEditVal.trim();
-      const matchOld =
-        oldSuperCat === "Sen clasificación superior" ? "" : oldSuperCat;
-      try {
-        await assignSuperCategory(category, newSuper, matchOld);
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.category === category && (t.superCategory || "") === matchOld
-              ? { ...t, superCategory: newSuper }
-              : t,
-          ),
-        );
-      } catch (err) {
-        console.error(err);
-        alert("Erro ao asignar clasificación superior");
-      }
-    }
-    setEditingSuperCatFor(null);
-  };
-
-  // Filter transactions and categories based on search
-  const filteredTxs = transactions.filter((t) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      t.name?.toLowerCase().includes(q) ||
-      t.category?.toLowerCase().includes(q) ||
-      t.counterparty?.toLowerCase().includes(q) ||
-      t.superCategory?.toLowerCase().includes(q)
-    );
-  });
-
-  const bulkTableTxs = filteredTxs.filter((t) => {
-    if (bulkCatFilter === "with" && !t.category) return false;
-    if (bulkCatFilter === "without" && t.category) return false;
-    if (bulkSuperCatFilter === "with" && !t.superCategory) return false;
-    if (bulkSuperCatFilter === "without" && t.superCategory) return false;
-    return true;
-  });
-
-  const activeCategories = Array.from(
-    new Set(filteredTxs.map((t) => t.category || "Sen clasificar")),
-  ) as string[];
-
-  const activeSuperCats = Array.from(
-    new Set(
-      filteredTxs.map((t) => t.superCategory || "Sen clasificación superior"),
-    ),
-  ) as string[];
-
-  // Create a list of unique (superCategory, category) combinations
-  const activeCombinations = Array.from(
-    new Set(
-      filteredTxs.map(
-        (t) =>
-          `${t.superCategory || "Sen clasificación superior"}|||${t.category || "Sen clasificar"}`,
-      ),
-    ),
-  );
-  const allExpanded =
-    activeCombinations.length > 0 &&
-    expandedCategories.size === activeCombinations.length &&
-    collapsedSuperCats.size === 0;
-
-  const toggleAllCategories = () => {
-    if (allExpanded) {
-      setExpandedCategories(new Set());
-      setCollapsedSuperCats(new Set(activeSuperCats));
-    } else {
-      setExpandedCategories(new Set(activeCombinations));
-      setCollapsedSuperCats(new Set());
-    }
-  };
-
-  const toggleCategory = (comboKey: string) => {
-    setExpandedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(comboKey)) next.delete(comboKey);
-      else next.add(comboKey);
-      return next;
-    });
-  };
-
-  const toggleSuperCat = (superCat: string) => {
-    setCollapsedSuperCats((prev) => {
-      const next = new Set(prev);
-      if (next.has(superCat)) {
-        next.delete(superCat);
-      } else {
-        next.add(superCat);
-      }
-      return next;
-    });
-  };
-
-  const handleEditClick = (
-    comboKey: string,
-    category: string,
-    e: React.MouseEvent,
-  ) => {
-    e.stopPropagation();
-    setEditingCategory(comboKey);
-    setEditVal(category);
-  };
-
-  const handleSave = async (
-    oldCategory: string,
-    oldSuperCategoryComboValue: string,
-  ) => {
-    if (editVal.trim() && editVal.trim() !== oldCategory) {
-      const newCat = editVal.trim();
-      const matchOldSuper =
-        oldSuperCategoryComboValue === "Sen clasificación superior"
-          ? ""
-          : oldSuperCategoryComboValue;
-      try {
-        await renameCategory(oldCategory, newCat, matchOldSuper);
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.category === oldCategory &&
-            (t.superCategory || "") === matchOldSuper
-              ? { ...t, category: newCat }
-              : t,
-          ),
-        );
-      } catch (err) {
-        console.error(err);
-        alert("Erro ao renomear a categoría");
-      }
-    }
-    setEditingCategory(null);
-  };
-
-  // Calculate available super categories for suggestions
-  const superCategories = Array.from(
-    new Set([
-      ...PREDEFINED_SUPERCATEGORIES,
-      ...(transactions.map((t) => t.superCategory).filter(Boolean) as string[]),
-    ]),
-  ).sort((a, b) => a.localeCompare(b));
-
-  return (
-    <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
-      {isAutoClassifying && (
-        <div className="mb-6 p-4 bg-blue-50/80 backdrop-blur-sm shadow-sm rounded-2xl flex items-center justify-center space-x-3 border border-blue-200">
-          <Loader2 size={24} className="animate-spin text-blue-600" />
-          <p className="text-sm font-medium text-blue-800">
-            Clasificando os movementos de forma automática... Isto pode tardar
-            uns segundos.
-          </p>
-        </div>
-      )}
-
-      <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between mb-8 pb-4 border-b border-slate-100 gap-4 xl:gap-0">
-        <div className="flex items-center gap-3 flex-wrap">
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900 mr-2">
-            Clasificacións
-          </h2>
-          <button
-            onClick={handleAutoClassify}
-            disabled={isAutoClassifying}
-            className="text-sm font-medium px-4 py-2 bg-white rounded-lg border border-slate-200 text-slate-700 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-sm"
-            title="Auto-clasificar os movementos e actualizar as categorías seguindo as regras aprendidas gardadas"
-          >
-            {isAutoClassifying ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : null}
-            {isAutoClassifying ? "Clasificando..." : "Clasificación automática"}
-          </button>
-          <button
-            onClick={() => setShowResetRulesModal(true)}
-            disabled={isDeletingRules}
-            className="text-sm font-medium px-4 py-2 bg-white rounded-lg border border-slate-200 text-slate-700 hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-sm"
-            title="Eliminar as regras de auto-clasificación aprendidas para futuros movementos"
-          >
-            {isDeletingRules ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : null}
-            Reiniciar regras
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 w-full xl:w-auto flex-wrap">
-          <div className="relative flex-1 sm:flex-none">
-            <Search
-              size={16}
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"
-            />
-            <input
-              type="text"
-              placeholder="Buscar..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full sm:w-48 pl-9 pr-4 py-2 text-sm font-medium bg-white border border-slate-200 outline-none focus:border-blue-500 rounded-lg text-slate-700 shadow-sm transition-colors"
-            />
-          </div>
-          {filteredTxs.length > 0 && (
-            <>
-              <button
-                onClick={() => setIsBulkEdit(!isBulkEdit)}
-                className={`text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-sm whitespace-nowrap ${isBulkEdit ? "bg-blue-600 text-white border border-blue-600" : "bg-white text-slate-700 hover:bg-slate-50 border border-slate-200"}`}
-              >
-                {isBulkEdit ? "Pechar edición masiva" : "Edición masiva"}
-              </button>
-
-              {!isBulkEdit && (
-                <>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as any)}
-                    className="text-sm font-medium text-slate-700 bg-white border border-slate-200 outline-none focus:border-blue-500 rounded-lg px-3 py-2 cursor-pointer shadow-sm transition-colors"
-                  >
-                    <option value="alpha">Alfabética</option>
-                    <option value="count">Nº elementos</option>
-                    <option value="amount">Importe total</option>
-                  </select>
-                  <button
-                    onClick={toggleAllCategories}
-                    className="text-sm font-medium text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 px-4 py-2 border border-slate-200 rounded-lg shadow-sm transition-colors whitespace-nowrap cursor-pointer"
-                  >
-                    {allExpanded ? "Reducir todo" : "Expandir todo"}
-                  </button>
-                </>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {isBulkEdit ? (
-        <div className="space-y-6">
-          <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex flex-col sm:flex-row gap-4 items-end">
-            <div className="flex-1 w-full space-y-1">
-              <label className="text-xs font-bold text-blue-800 uppercase">
-                Clasificación Superior
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={bulkSuperCategory}
-                  onChange={(e) => setBulkSuperCategory(e.target.value)}
-                  placeholder="Ex: Fogar"
-                  list="bulk-supercats"
-                  className="w-full px-4 py-2 rounded-xl border border-blue-200 outline-none focus:border-blue-500"
-                />
-                <datalist id="bulk-supercats">
-                  {superCategories.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-            </div>
-
-            <div className="flex-1 w-full space-y-1">
-              <label className="text-xs font-bold text-blue-800 uppercase">
-                Clasificación
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={bulkCategory}
-                  onChange={(e) => setBulkCategory(e.target.value)}
-                  placeholder="Ex: Internet"
-                  list="bulk-cats"
-                  className="w-full px-4 py-2 rounded-xl border border-blue-200 outline-none focus:border-blue-500"
-                />
-                <datalist id="bulk-cats">
-                  {availableCategories.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-            </div>
-
-            <button
-              onClick={handleBulkSave}
-              disabled={
-                bulkSaving ||
-                selectedTxNames.size === 0 ||
-                (!bulkCategory && !bulkSuperCategory)
-              }
-              className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center space-x-2 h-[42px]"
-            >
-              {bulkSaving ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : null}
-              <span>Gardar ({selectedTxNames.size})</span>
-            </button>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between mb-4">
-            <div className="flex flex-wrap gap-4 items-center">
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Categoría:
-                </label>
-                <select
-                  value={bulkCatFilter}
-                  onChange={(e) => setBulkCatFilter(e.target.value as any)}
-                  className="text-sm font-medium text-slate-700 bg-white border border-slate-200 outline-none focus:border-blue-500 rounded-lg px-3 py-1.5 cursor-pointer shadow-sm transition-colors"
-                >
-                  <option value="all">Todas</option>
-                  <option value="with">Con categoría</option>
-                  <option value="without">Sen categoría</option>
-                </select>
-              </div>
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Superclasificación:
-                </label>
-                <select
-                  value={bulkSuperCatFilter}
-                  onChange={(e) => setBulkSuperCatFilter(e.target.value as any)}
-                  className="text-sm font-medium text-slate-700 bg-white border border-slate-200 outline-none focus:border-blue-500 rounded-lg px-3 py-1.5 cursor-pointer shadow-sm transition-colors"
-                >
-                  <option value="all">Todas</option>
-                  <option value="with">Con superclasif.</option>
-                  <option value="without">Sen superclasif.</option>
-                </select>
-              </div>
-            </div>
-            <div className="text-sm font-medium text-slate-500">
-              Amosando {new Set(bulkTableTxs.map((t) => t.name)).size}{" "}
-              movementos{" "}
-              {bulkTableTxs.length !== filteredTxs.length
-                ? `(filtrados de ${new Set(filteredTxs.map((t) => t.name)).size})`
-                : ""}
-            </div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-            <div className="max-h-[600px] overflow-y-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-100 sticky top-0 z-10 shadow-sm">
-                  <tr>
-                    <th className="px-4 py-3 border-b border-slate-200">
-                      <input
-                        type="checkbox"
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            // Select all unique names in current filter
-                            const names = Array.from(
-                              new Set(bulkTableTxs.map((t) => t.name)),
-                            );
-                            setSelectedTxNames(new Set(names));
-                          } else {
-                            setSelectedTxNames(new Set());
-                          }
-                        }}
-                        checked={
-                          selectedTxNames.size > 0 &&
-                          selectedTxNames.size ===
-                            new Set(bulkTableTxs.map((t) => t.name)).size
-                        }
-                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer w-4 h-4"
-                      />
-                    </th>
-                    <th
-                      className="px-4 py-3 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase cursor-pointer hover:bg-slate-200 transition-colors"
-                      onClick={() => {
-                        if (bulkSortBy === "name")
-                          setBulkSortOrder((prev) =>
-                            prev === "asc" ? "desc" : "asc",
-                          );
-                        else {
-                          setBulkSortBy("name");
-                          setBulkSortOrder("asc");
-                        }
-                      }}
-                    >
-                      Descrición{" "}
-                      {bulkSortBy === "name"
-                        ? bulkSortOrder === "asc"
-                          ? "↑"
-                          : "↓"
-                        : ""}
-                    </th>
-                    <th
-                      className="px-4 py-3 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase cursor-pointer hover:bg-slate-200 transition-colors"
-                      onClick={() => {
-                        if (bulkSortBy === "superCategory")
-                          setBulkSortOrder((prev) =>
-                            prev === "asc" ? "desc" : "asc",
-                          );
-                        else {
-                          setBulkSortBy("superCategory");
-                          setBulkSortOrder("asc");
-                        }
-                      }}
-                    >
-                      Super Clas. Actual{" "}
-                      {bulkSortBy === "superCategory"
-                        ? bulkSortOrder === "asc"
-                          ? "↑"
-                          : "↓"
-                        : ""}
-                    </th>
-                    <th
-                      className="px-4 py-3 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase cursor-pointer hover:bg-slate-200 transition-colors"
-                      onClick={() => {
-                        if (bulkSortBy === "category")
-                          setBulkSortOrder((prev) =>
-                            prev === "asc" ? "desc" : "asc",
-                          );
-                        else {
-                          setBulkSortBy("category");
-                          setBulkSortOrder("asc");
-                        }
-                      }}
-                    >
-                      Clasificación Actual{" "}
-                      {bulkSortBy === "category"
-                        ? bulkSortOrder === "asc"
-                          ? "↑"
-                          : "↓"
-                        : ""}
-                    </th>
-                    <th
-                      className="px-4 py-3 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                      onClick={() => {
-                        if (bulkSortBy === "count")
-                          setBulkSortOrder((prev) =>
-                            prev === "asc" ? "desc" : "asc",
-                          );
-                        else {
-                          setBulkSortBy("count");
-                          setBulkSortOrder("desc");
-                        }
-                      }}
-                    >
-                      Cantidade{" "}
-                      {bulkSortBy === "count"
-                        ? bulkSortOrder === "asc"
-                          ? "↑"
-                          : "↓"
-                        : ""}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {(() => {
-                    // Group by name
-                    const grouped = bulkTableTxs.reduce(
-                      (acc, t) => {
-                        if (!acc[t.name]) {
-                          acc[t.name] = {
-                            name: t.name,
-                            category: t.category || "",
-                            superCategory: t.superCategory || "",
-                            count: 0,
-                          };
-                        }
-                        acc[t.name].count += 1;
-                        return acc;
-                      },
-                      {} as Record<
-                        string,
-                        {
-                          name: string;
-                          category: string;
-                          superCategory: string;
-                          count: number;
-                        }
-                      >,
-                    );
-
-                    const sortedGroups = Object.values(grouped).sort((a, b) => {
-                      if (bulkSortBy === "count") {
-                        if (
-                          a.category === "📦 Outros" &&
-                          b.category !== "📦 Outros"
-                        )
-                          return -1;
-                        if (
-                          a.category !== "📦 Outros" &&
-                          b.category === "📦 Outros"
-                        )
-                          return 1;
-                      }
-
-                      if (bulkSortBy === "name") {
-                        return bulkSortOrder === "asc"
-                          ? a.name.localeCompare(b.name)
-                          : b.name.localeCompare(a.name);
-                      } else if (bulkSortBy === "superCategory") {
-                        return bulkSortOrder === "asc"
-                          ? a.superCategory.localeCompare(b.superCategory)
-                          : b.superCategory.localeCompare(a.superCategory);
-                      } else if (bulkSortBy === "category") {
-                        return bulkSortOrder === "asc"
-                          ? a.category.localeCompare(b.category)
-                          : b.category.localeCompare(a.category);
-                      } else {
-                        return bulkSortOrder === "asc"
-                          ? a.count - b.count
-                          : b.count - a.count;
-                      }
-                    });
-
-                    if (sortedGroups.length === 0) {
-                      return (
-                        <tr>
-                          <td
-                            colSpan={5}
-                            className="px-4 py-8 text-center text-slate-500"
-                          >
-                            Non hai movementos que coincidan coa busca.
-                          </td>
-                        </tr>
-                      );
-                    }
-
-                    return sortedGroups.map((group) => (
-                      <tr
-                        key={group.name}
-                        className={`hover:bg-blue-50/50 transition-colors ${selectedTxNames.has(group.name) ? "bg-blue-50/30" : ""}`}
-                      >
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedTxNames.has(group.name)}
-                            onChange={(e) => {
-                              setSelectedTxNames((prev) => {
-                                const next = new Set(prev);
-                                if (e.target.checked) next.add(group.name);
-                                else next.delete(group.name);
-                                return next;
-                              });
-                            }}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer w-4 h-4 mt-1"
-                          />
-                        </td>
-                        <td className="px-4 py-3 font-medium text-slate-900 text-sm">
-                          {group.name}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-500">
-                          {group.superCategory || (
-                            <span className="text-slate-300 italic">
-                              Sen asignar
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {group.category === "📦 Outros" ||
-                          group.category === "Outros" ||
-                          !group.category ? (
-                            <span className="inline-block px-2 py-1 bg-amber-50 text-amber-700 text-xs font-semibold rounded-md">
-                              Sen clasificar
-                            </span>
-                          ) : (
-                            <span className="inline-block px-2 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded-md">
-                              {group.category}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-500 text-right">
-                          {group.count} mov.
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      ) : activeCategories.length === 0 ? (
-        <p className="text-slate-500 text-center py-12">
-          {searchQuery
-            ? "Non se atopou ningunha clasificación."
-            : "Aínda non tes categorías. Asigna algunha na pestana de movementos."}
-        </p>
-      ) : (
-        <div className="space-y-8">
-          {(() => {
-            const catAndSuperCatPairs = filteredTxs.map((t) => ({
-              category: t.category || "Sen clasificar",
-              superCategory: t.superCategory || "Sen clasificación superior",
-            }));
-            const uniquePairs = Array.from(
-              new Set(catAndSuperCatPairs.map((p) => JSON.stringify(p))),
-            ).map((p) => JSON.parse(p));
-
-            const categoriesBySuperCat = uniquePairs.reduce(
-              (acc, pair: { category: string; superCategory: string }) => {
-                if (!acc[pair.superCategory]) acc[pair.superCategory] = [];
-                acc[pair.superCategory].push(pair.category);
-                return acc;
-              },
-              {} as Record<string, string[]>,
-            );
-
-            const sortedSuperCats = Object.keys(categoriesBySuperCat).sort(
-              (a, b) => {
-                if (a === "Sen clasificación superior") return 1;
-                if (b === "Sen clasificación superior") return -1;
-                return a.localeCompare(b);
-              },
-            );
-
-            return sortedSuperCats.map((superCat) => {
-              const groupCats = categoriesBySuperCat[superCat];
-              const groupTxsForTotal = filteredTxs.filter(
-                (t) =>
-                  groupCats.includes(t.category || "Sen clasificar") &&
-                  (t.superCategory || "Sen clasificación superior") ===
-                    superCat,
-              );
-              const groupTotal = groupTxsForTotal.reduce(
-                (acc, t) => acc + t.amount,
-                0,
-              );
-
-              return (
-                <div key={superCat} className="space-y-4">
-                  <div
-                    onClick={() => toggleSuperCat(superCat)}
-                    className="flex items-center justify-between pb-2 border-b border-slate-200 cursor-pointer group hover:border-slate-300 transition-colors"
-                  >
-                    <h3 className="text-lg font-bold text-slate-800 flex items-center">
-                      <ChevronDown
-                        size={20}
-                        className={`mr-2 text-slate-400 min-w-4 transition-transform group-hover:text-slate-600 ${collapsedSuperCats.has(superCat) ? "" : "rotate-180"}`}
-                      />
-                      {superCat}
-                      <span className="ml-3 px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-xs font-medium">
-                        {groupCats.length}{" "}
-                        {groupCats.length === 1
-                          ? "clasificación"
-                          : "clasificacións"}
-                      </span>
-                    </h3>
-                    <div
-                      className={`font-bold text-lg ${groupTotal < 0 ? "text-slate-900" : "text-green-600"}`}
-                    >
-                      {groupTotal > 0 && "+"}
-                      {groupTotal.toFixed(2)} €
-                    </div>
-                  </div>
-
-                  {!collapsedSuperCats.has(superCat) && (
-                    <div className="space-y-4 pl-0 sm:pl-4 sm:border-l-2 border-slate-100">
-                      {groupCats.map((category: string) => {
-                        const txs = filteredTxs.filter(
-                          (t) =>
-                            (t.category || "Sen clasificar") === category &&
-                            (t.superCategory ||
-                              "Sen clasificación superior") === superCat,
-                        );
-                        const total = txs.reduce((acc, t) => acc + t.amount, 0);
-                        const comboKey = `${superCat}|||${category}`;
-                        const isExpanded = expandedCategories.has(comboKey);
-
-                        return (
-                          <div
-                            key={comboKey}
-                            className="border border-slate-100 rounded-2xl overflow-hidden transition-all duration-200"
-                          >
-                            <div
-                              onClick={() => toggleCategory(comboKey)}
-                              className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 hover:bg-slate-50 transition-colors cursor-pointer ${isExpanded ? "bg-slate-50 border-b border-slate-100" : ""}`}
-                            >
-                              <div className="flex-1 w-full flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
-                                <div className="flex items-center space-x-3">
-                                  <ChevronDown
-                                    size={18}
-                                    className={`text-slate-400 min-w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                                  />
-                                  {editingCategory === comboKey &&
-                                  category !== "Sen clasificar" ? (
-                                    <input
-                                      type="text"
-                                      value={editVal}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={(e) =>
-                                        setEditVal(e.target.value)
-                                      }
-                                      onKeyDown={(e) =>
-                                        e.key === "Enter" &&
-                                        handleSave(category, superCat)
-                                      }
-                                      onBlur={() =>
-                                        handleSave(category, superCat)
-                                      }
-                                      autoFocus
-                                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500 w-full sm:max-w-xs"
-                                    />
-                                  ) : (
-                                    <div className="flex items-center group">
-                                      <h3
-                                        className={`font-bold ${category === "Sen clasificar" ? "text-amber-700" : "text-slate-800 hover:text-blue-600"} transition-colors`}
-                                        onClick={(e) =>
-                                          category !== "Sen clasificar" &&
-                                          handleEditClick(comboKey, category, e)
-                                        }
-                                        title={
-                                          category === "Sen clasificar"
-                                            ? ""
-                                            : "Editar clasificación"
-                                        }
-                                      >
-                                        {category}
-                                      </h3>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Super category display and edit */}
-                                <div className="flex items-center ml-7 sm:ml-0 before:content-[''] before:hidden sm:before:block before:w-1 before:h-1 before:bg-slate-300 before:rounded-full before:mx-3">
-                                  {editingSuperCatFor === comboKey &&
-                                  category !== "Sen clasificar" ? (
-                                    <div
-                                      className="relative"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <input
-                                        type="text"
-                                        value={superCatEditVal}
-                                        onChange={(e) =>
-                                          setSuperCatEditVal(e.target.value)
-                                        }
-                                        className="text-xs px-2 py-1 rounded-sm bg-white border border-slate-300 outline-none focus:border-blue-500 shadow-sm w-36"
-                                        placeholder="Categoría superior"
-                                        autoFocus
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter")
-                                            e.currentTarget.blur();
-                                          if (e.key === "Escape")
-                                            setEditingSuperCatFor(null);
-                                        }}
-                                        onBlur={() =>
-                                          setTimeout(
-                                            () =>
-                                              handleSaveSuperCat(
-                                                category,
-                                                superCat,
-                                              ),
-                                            150,
-                                          )
-                                        }
-                                        list={`super-categories`}
-                                      />
-                                      <datalist id="super-categories">
-                                        {superCategories.map((cat) => (
-                                          <option key={cat} value={cat} />
-                                        ))}
-                                      </datalist>
-                                    </div>
-                                  ) : (
-                                    <span
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (category !== "Sen clasificar") {
-                                          setEditingSuperCatFor(comboKey);
-                                          setSuperCatEditVal(
-                                            superCat ===
-                                              "Sen clasificación superior"
-                                              ? ""
-                                              : superCat,
-                                          );
-                                        }
-                                      }}
-                                      className={`inline-block px-2 py-0.5 text-xs font-medium ${category === "Sen clasificar" ? "text-slate-400 bg-slate-50" : "text-slate-500 bg-slate-100 hover:bg-slate-200 cursor-pointer"} rounded-md transition-colors`}
-                                      title={
-                                        category === "Sen clasificar"
-                                          ? ""
-                                          : "Fai clic para editar"
-                                      }
-                                    >
-                                      {superCat === "Sen clasificación superior"
-                                        ? "+ Clasificación superior"
-                                        : superCat}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="mt-4 sm:mt-0 flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-end pl-7 sm:pl-0">
-                                <p className="text-sm text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full">
-                                  {txs.length}{" "}
-                                  {txs.length === 1
-                                    ? "movemento"
-                                    : "movementos"}
-                                </p>
-                                <div
-                                  className={`font-bold text-lg min-w-[100px] text-right ${total < 0 ? "text-slate-900" : "text-green-600"}`}
-                                >
-                                  {total > 0 && "+"}
-                                  {total.toFixed(2)} €
-                                </div>
-                              </div>
-                            </div>
-
-                            {isExpanded && (
-                              <div className="p-2 space-y-1 bg-white">
-                                {txs.map((tx, idx) => (
-                                  <div
-                                    key={tx.transaction_id || idx}
-                                    className="flex justify-between items-center p-3 rounded-xl hover:bg-slate-50 transition-colors"
-                                  >
-                                    <div className="space-y-1">
-                                      <p className="font-medium text-sm text-slate-800">
-                                        {tx.name}
-                                        {tx.counterparty && (
-                                          <span className="ml-2 px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded text-[10px] font-semibold whitespace-nowrap">
-                                            {tx.counterparty}
-                                          </span>
-                                        )}
-                                      </p>
-                                      <div className="flex items-center space-x-2">
-                                        <p className="text-xs text-slate-500">
-                                          {new Date(tx.date).toLocaleDateString(
-                                            "gl-ES",
-                                          )}
-                                        </p>
-
-                                        {/* TX category editing */}
-                                        {editingTxId === tx.transaction_id ? (
-                                          <div className="relative">
-                                            <input
-                                              type="text"
-                                              value={editTxCategoryVal}
-                                              onChange={(e) => {
-                                                setEditTxCategoryVal(
-                                                  e.target.value,
-                                                );
-                                                setShowTxSuggestions(true);
-                                              }}
-                                              onFocus={() =>
-                                                setShowTxSuggestions(true)
-                                              }
-                                              className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-slate-300 outline-none focus:border-blue-500 shadow-sm w-32"
-                                              placeholder="Categoría"
-                                              autoFocus
-                                              onKeyDown={(e) => {
-                                                if (e.key === "Enter")
-                                                  e.currentTarget.blur();
-                                                else if (e.key === "Escape")
-                                                  setEditingTxId(null);
-                                              }}
-                                              onBlur={() =>
-                                                setTimeout(
-                                                  () =>
-                                                    handleSaveTx(
-                                                      tx.transaction_id,
-                                                    ),
-                                                  150,
-                                                )
-                                              }
-                                            />
-                                            {showTxSuggestions &&
-                                              availableCategories.length >
-                                                0 && (
-                                                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto top-full right-0 text-left">
-                                                  {(editTxCategoryVal ===
-                                                  (tx.category || "")
-                                                    ? availableCategories
-                                                    : availableCategories.filter(
-                                                        (cat) =>
-                                                          cat
-                                                            .toLowerCase()
-                                                            .includes(
-                                                              editTxCategoryVal.toLowerCase(),
-                                                            ),
-                                                      )
-                                                  ).map((cat) => (
-                                                    <div
-                                                      key={cat}
-                                                      className="px-3 py-1.5 text-xs cursor-pointer hover:bg-slate-100 text-slate-700 break-words"
-                                                      onMouseDown={(e) => {
-                                                        e.preventDefault();
-                                                        setEditTxCategoryVal(
-                                                          cat,
-                                                        );
-                                                        onUpdateCategory(
-                                                          tx.transaction_id,
-                                                          cat,
-                                                        );
-                                                        setEditingTxId(null);
-                                                        setShowTxSuggestions(
-                                                          false,
-                                                        );
-                                                      }}
-                                                    >
-                                                      {cat}
-                                                    </div>
-                                                  ))}
-                                                </div>
-                                              )}
-                                          </div>
-                                        ) : (
-                                          <span
-                                            onClick={(e) =>
-                                              handleEditTxClick(tx, e)
-                                            }
-                                            className="inline-block px-1.5 py-0 text-[10px] uppercase tracking-wider font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded cursor-pointer transition-colors"
-                                          >
-                                            {tx.category || "Reclasificar"}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div
-                                      className={`font-bold text-sm ${tx.amount < 0 ? "text-slate-900" : "text-green-600"}`}
-                                    >
-                                      {tx.amount < 0 ? "-" : "+"}
-                                      {Math.abs(tx.amount).toFixed(2)} €
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            });
-          })()}
-        </div>
-      )}
-
-      {showResetRulesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-xl text-center">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">
-              Eliminar regras aprendidas
-            </h3>
-            <p className="text-slate-600 mb-6 text-sm text-left">
-              Isto eliminará todas as regras de auto-clasificación gardadas no
-              sistema.
-            </p>
-
-            {!resetRulesMessage && (
-              <div className="mb-6 flex items-start flex-row pt-4 border-t border-slate-100">
-                <input
-                  type="checkbox"
-                  id="resetExisting"
-                  checked={resetExistingTransactions}
-                  onChange={(e) =>
-                    setResetExistingTransactions(e.target.checked)
-                  }
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <label
-                  htmlFor="resetExisting"
-                  className="ml-3 text-sm text-slate-700 text-left"
-                >
-                  Tamén eliminar as categorías xa asignadas a{" "}
-                  <b>todos os movementos actuais</b> no sistema. (Volverán a
-                  estar "Sen clasificar").
-                </label>
-              </div>
-            )}
-
-            {resetRulesMessage && (
-              <div
-                className={`mb-6 p-4 rounded-xl text-sm font-medium ${resetRulesMessage.type === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}
-              >
-                {resetRulesMessage.text}
-              </div>
-            )}
-
-            {!resetRulesMessage && (
-              <div className="flex space-x-4">
-                <button
-                  onClick={executeClearLearnedRules}
-                  disabled={isDeletingRules}
-                  className="flex-1 bg-red-600 text-white rounded-xl py-3 font-medium hover:bg-red-700 transition-colors flex justify-center flex-row items-center cursor-pointer disabled:opacity-50 gap-2"
-                >
-                  {isDeletingRules && (
-                    <Loader2 size={16} className="animate-spin" />
-                  )}
-                  Confirmar
-                </button>
-                <button
-                  onClick={() => setShowResetRulesModal(false)}
-                  disabled={isDeletingRules}
-                  className="flex-1 bg-white text-slate-700 rounded-xl py-3 font-medium border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -2326,7 +1146,7 @@ export default function App() {
 
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([]);
   const [currentTab, setCurrentTab] = useState<
-    "overview" | "movements" | "categories" | "import" | "insights"
+    "overview" | "movements" | "categories" | "import"
   >("overview");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryUpdateDialog, setCategoryUpdateDialog] = useState<{
@@ -2349,6 +1169,8 @@ export default function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [tempPaydayStart, setTempPaydayStart] = useState<number>(28);
   const [tempPaydayEnd, setTempPaydayEnd] = useState<number>(31);
+  const [customCategoriesMap, setCustomCategoriesMap] = useState<Record<string, string>>({});
+  const [customSuperCategories, setCustomSuperCategories] = useState<string[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -2365,6 +1187,12 @@ export default function App() {
           if (profile && profile.paydayEnd) {
             setUserPaydayEnd(profile.paydayEnd);
             setTempPaydayEnd(profile.paydayEnd);
+          }
+          if (profile && profile.customCategoriesMap) {
+            setCustomCategoriesMap(profile.customCategoriesMap);
+          }
+          if (profile && profile.customSuperCategories) {
+            setCustomSuperCategories(profile.customSuperCategories);
           }
         } catch (e) {
           // ignore
@@ -2443,12 +1271,16 @@ export default function App() {
   const availableCategories = Array.from(
     new Set([
       ...PREDEFINED_CATEGORIES,
+      ...Object.keys(customCategoriesMap),
       ...(transactions.map((tx) => tx.category).filter(Boolean) as string[]),
     ]),
   ).sort((a, b) => a.localeCompare(b));
 
   const availableSuperCategories = Array.from(
     new Set([
+      ...PREDEFINED_SUPERCATEGORIES,
+      ...customSuperCategories,
+      ...Object.values(customCategoriesMap),
       ...(transactions.map((tx) => tx.superCategory).filter(Boolean) as string[]),
     ]),
   ).sort((a, b) => a.localeCompare(b));
@@ -2706,14 +1538,14 @@ export default function App() {
               Clasificacións
             </button>
             <button
-              onClick={() => setCurrentTab("insights")}
-              className={`pb-4 text-sm font-bold transition-colors cursor-pointer flex items-center gap-2 ${
-                currentTab === "insights"
+              onClick={() => setCurrentTab("movements")}
+              className={`pb-4 text-sm font-bold transition-colors cursor-pointer ${
+                currentTab === "movements"
                   ? "border-b-2 border-slate-900 text-slate-900"
                   : "text-slate-500 hover:text-slate-700 border-b-2 border-transparent"
               }`}
             >
-              <Bell size={16} /> Asistente
+              Movementos
             </button>
             <button
               onClick={() => setCurrentTab("import")}
@@ -2724,16 +1556,6 @@ export default function App() {
               }`}
             >
               Importación
-            </button>
-            <button
-              onClick={() => setCurrentTab("movements")}
-              className={`pb-4 text-sm font-bold transition-colors cursor-pointer ${
-                currentTab === "movements"
-                  ? "border-b-2 border-slate-900 text-slate-900"
-                  : "text-slate-500 hover:text-slate-700 border-b-2 border-transparent"
-              }`}
-            >
-              Movementos
             </button>
           </div>
 
@@ -2905,8 +1727,14 @@ export default function App() {
               <CategoriesManager
                 transactions={transactions}
                 availableCategories={availableCategories}
+                availableSuperCategories={availableSuperCategories}
+                customCategoriesMap={customCategoriesMap}
+                customSuperCategories={customSuperCategories}
+                setCustomCategoriesMap={setCustomCategoriesMap}
+                setCustomSuperCategories={setCustomSuperCategories}
                 setTransactions={setTransactions}
                 onUpdateCategory={handleUpdateCategory}
+                onUpdateSuperCategory={handleUpdateSuperCategory}
               />
             </div>
           )}
@@ -2972,11 +1800,7 @@ export default function App() {
             </div>
           )}
 
-          {currentTab === "insights" && (
-            <div className="space-y-6">
-              <InsightsManager transactions={transactions} />
-            </div>
-          )}
+          
         </div>
       )}
 
