@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Transaction } from "./lib/firestore";
-import { Search, Play, RefreshCw, Check, AlertTriangle, Tag, Inbox, Edit2, X, Plus, Trash2 } from "lucide-react";
+import { Search, Play, RefreshCw, Check, Tag, Inbox, Edit2, X, Plus, Trash2 } from "lucide-react";
 import {
   autoClassifyCurrentTransactions,
   getTransactionsFromFirestore,
@@ -10,7 +10,6 @@ import {
   addCustomSuperCategory,
   removeCustomCategory,
   removeCustomSuperCategory,
-  bulkUpdateTransactionsByNames
 } from "./lib/firestore";
 import { PREDEFINED_SUPERCATEGORIES, /* PREDEFINED_CATEGORIES */ } from "./App";
 import { MassEditModal } from "./MassEditModal";
@@ -464,7 +463,9 @@ function ClasificarView({
   const filteredTx = useMemo(() => {
     let filtered = transactions;
     if (filter === "pending") {
-      filtered = filtered.filter(t => !t.category || t.category === "Outros");
+      filtered = filtered.filter(
+        (t) => !t.category || t.category === "Outros" || !t.superCategory,
+      );
     }
     if (searchQuery.trim() !== "") {
       const q = searchQuery.toLowerCase();

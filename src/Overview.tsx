@@ -1,6 +1,18 @@
 import React, { useState, useMemo } from "react";
 import { Transaction } from "./lib/firestore";
-import { TrendingDown, Scissors, Repeat, Wallet, Info, X } from "lucide-react";
+import { TrendingDown, Scissors, Repeat, Wallet, Info, X, Calendar } from "lucide-react";
+
+export interface PayrollCycle {
+  id: string;
+  startDateStr: string;
+  endDateStr: string | null;
+  label: string;
+  monthName: string;
+  year: number;
+  month: number;
+  isCurrent: boolean;
+  dateRangeText: string;
+}
 
 export function Overview({
   transactions,
@@ -17,15 +29,16 @@ export function Overview({
     useState<number>(6);
   const [antExpenseMonthsBack, setAntExpenseMonthsBack] = useState<number>(1);
   const [antExpenseThreshold, setAntExpenseThreshold] = useState<number>(10);
+  const [selectedCycleId, setSelectedCycleId] = useState<string>("");
 
-  const insights = useMemo(() => {
-    let cycleStartDateStr = "";
-
+  const availableCycles = useMemo<PayrollCycle[]>(() => {
     const sortedByDate = [...transactions].sort((a, b) =>
       b.date.localeCompare(a.date),
     );
     const startWindow = userPaydayStart || 24;
     const endWindow = userPaydayEnd || 31;
+
+    const salaryDates: string[] = [];
 
     for (const t of sortedByDate) {
       const day = parseInt(t.date.substring(8, 10), 10);
@@ -41,40 +54,146 @@ export function Overview({
         inWindow = day >= startWindow || day <= endWindow;
       }
 
-      // Fallback: any large income around the user's configured payday window
       const isLikelySalary = t.amount > 600 && inWindow;
 
       if (t.amount > 0 && (isNomina || isLikelySalary)) {
-        cycleStartDateStr = t.date;
-        break;
+        const isClose = salaryDates.some((d) => {
+          const diffDays = Math.abs(
+            (new Date(d).getTime() - new Date(t.date).getTime()) /
+              (1000 * 60 * 60 * 24),
+          );
+          return diffDays < 15;
+        });
+        if (!isClose) {
+          salaryDates.push(t.date);
+        }
       }
     }
 
-    // Fallback if no salary found at all
-    if (!cycleStartDateStr) {
+    // Also include any months present in transactions that might not have a detected salary
+    const monthsInTransactions = Array.from(
+      new Set(transactions.map((t) => t.date.substring(0, 7))),
+    );
+    const fallbackDay = userPaydayStart || 24;
+    for (const ym of monthsInTransactions) {
+      const parts = ym.split("-").map(Number);
+      const y = parts[0];
+      const m = parts[1];
+      const fallbackStr = `${y}-${String(m).padStart(2, "0")}-${String(Math.min(28, fallbackDay)).padStart(2, "0")}`;
+      const isClose = salaryDates.some((d) => {
+        const diffDays = Math.abs(
+          (new Date(d).getTime() - new Date(fallbackStr).getTime()) /
+            (1000 * 60 * 60 * 24),
+        );
+        return diffDays < 20;
+      });
+      if (!isClose) {
+        salaryDates.push(fallbackStr);
+      }
+    }
+
+    if (salaryDates.length === 0) {
       const today = new Date();
+      const fallbackSalaryDay = userPaydayStart || 28;
       let fallbackDate: Date;
-      const fallbackDay = userPaydayStart || 28;
-      if (today.getDate() >= fallbackDay) {
-        fallbackDate = new Date(
-          today.getFullYear(),
-          today.getMonth(),
-          fallbackDay,
-        );
+      if (today.getDate() >= fallbackSalaryDay) {
+        fallbackDate = new Date(today.getFullYear(), today.getMonth(), fallbackSalaryDay);
       } else {
-        fallbackDate = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          fallbackDay,
-        );
+        fallbackDate = new Date(today.getFullYear(), today.getMonth() - 1, fallbackSalaryDay);
       }
       const formatDate = (d: Date) =>
         `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      cycleStartDateStr = formatDate(fallbackDate);
+      salaryDates.push(formatDate(fallbackDate));
     }
+
+    salaryDates.sort((a, b) => b.localeCompare(a));
+
+    const monthNames = [
+      "Xaneiro", "Febreiro", "Marzo", "Abril", "Maio", "Xuño",
+      "Xullo", "Agosto", "Setembro", "Outubro", "Novembro", "Decembro"
+    ];
+
+    return salaryDates.map((startDateStr, index) => {
+      const isCurrent = index === 0;
+      let endDateStr: string | null = null;
+      if (!isCurrent) {
+        const nextCycleStart = new Date(salaryDates[index - 1]);
+        nextCycleStart.setDate(nextCycleStart.getDate() - 1);
+        endDateStr = `${nextCycleStart.getFullYear()}-${String(nextCycleStart.getMonth() + 1).padStart(2, "0")}-${String(nextCycleStart.getDate()).padStart(2, "0")}`;
+      }
+
+      const d = new Date(startDateStr);
+      let cycleYear = d.getFullYear();
+      let cycleMonth = d.getMonth() + 1;
+      if (d.getDate() >= 20) {
+        cycleMonth += 1;
+        if (cycleMonth > 12) {
+          cycleMonth = 1;
+          cycleYear += 1;
+        }
+      }
+
+      const monthName = monthNames[cycleMonth - 1] || "Mes";
+      const startFormatted = startDateStr.split("-").reverse().join("/");
+      let dateRangeText = "";
+      if (isCurrent) {
+        dateRangeText = `dende o ${startFormatted}`;
+      } else if (endDateStr) {
+        const endFormatted = endDateStr.split("-").reverse().join("/");
+        dateRangeText = `${startFormatted} ata o ${endFormatted}`;
+      } else {
+        dateRangeText = `dende o ${startFormatted}`;
+      }
+
+      return {
+        id: startDateStr,
+        startDateStr,
+        endDateStr,
+        label: isCurrent ? `Mes actual (${monthName} ${cycleYear})` : `${monthName} ${cycleYear}`,
+        monthName,
+        year: cycleYear,
+        month: cycleMonth,
+        isCurrent,
+        dateRangeText,
+      };
+    });
+  }, [transactions, userPaydayStart, userPaydayEnd]);
+
+  const activeCycle = useMemo<PayrollCycle>(() => {
+    if (!availableCycles.length) {
+      return {
+        id: "fallback",
+        startDateStr: new Date().toISOString().substring(0, 10),
+        endDateStr: null,
+        label: "Mes actual",
+        monthName: "Mes",
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+        isCurrent: true,
+        dateRangeText: "dende hoxe",
+      };
+    }
+    return (
+      availableCycles.find((c) => c.id === selectedCycleId) || availableCycles[0]
+    );
+  }, [availableCycles, selectedCycleId]);
+
+  const insights = useMemo(() => {
+    const cycleStartDateStr = activeCycle.startDateStr;
+    const cycleEndDateStr = activeCycle.endDateStr;
+
+    const currentCycleTxs = transactions.filter((t) => {
+      if (t.date < cycleStartDateStr) return false;
+      if (cycleEndDateStr && t.date > cycleEndDateStr) return false;
+      return true;
+    });
 
     let totalIncome = 0;
     let totalExpenses = 0;
+    currentCycleTxs.forEach((t) => {
+      if (t.amount > 0) totalIncome += t.amount;
+      else totalExpenses += Math.abs(t.amount);
+    });
 
     // Ant-expenses (Gasto formiga) - items under 10 euros that aren't recurring and span current month
     let antExpenses: { name: string; amount: number; date: string }[] = [];
@@ -87,11 +206,6 @@ export function Overview({
     const antLimitDateStr = antLimitDate.toISOString().substring(0, 10);
 
     transactions.forEach((t) => {
-      if (t.date >= cycleStartDateStr) {
-        if (t.amount > 0) totalIncome += t.amount;
-        else totalExpenses += Math.abs(t.amount);
-      }
-
       const isWithinAntTimeframe =
         antExpenseMonthsBack === 0 || t.date >= antLimitDateStr;
 
@@ -149,9 +263,12 @@ export function Overview({
           recurring.push({ name: key, avgAmount, count: txs.length });
           totalRecurringNextMonth += avgAmount;
 
-          // Add to current month recurring if we paid it this month
+          // Add to current month recurring if we paid it in this cycle
           txs.forEach((t) => {
-            if (t.date >= cycleStartDateStr) {
+            const inCycle =
+              t.date >= cycleStartDateStr &&
+              (!cycleEndDateStr || t.date <= cycleEndDateStr);
+            if (inCycle) {
               currentMonthRecurring += Math.abs(t.amount);
             }
           });
@@ -169,10 +286,6 @@ export function Overview({
       outros: { total: 0, txs: [] as Transaction[] } 
     };
     const expenseBreakdown: Record<string, { total: number; txs: Transaction[] }> = {};
-
-    const currentCycleTxs = transactions.filter(
-      (t) => t.date >= cycleStartDateStr,
-    );
 
     currentCycleTxs.forEach((t) => {
       const amount = Math.abs(t.amount);
@@ -201,19 +314,41 @@ export function Overview({
       }
     });
 
+    const savingsInvestmentsAmount = expenseBreakdown["Aforro e Investimento"]?.total || 0;
+    const adjustedPotentialSavings = totalIncome - (totalExpenses - savingsInvestmentsAmount);
+
     const savingsRate =
       totalIncome > 0 ? (potentialSavings / totalIncome) * 100 : 0;
+    const adjustedSavingsRate =
+      totalIncome > 0 ? (adjustedPotentialSavings / totalIncome) * 100 : 0;
 
     const today = new Date();
-    const cycleStart = new Date(cycleStartDateStr);
-    let cycleEnd = new Date(cycleStart);
-    cycleEnd.setMonth(cycleEnd.getMonth() + 1);
     const msPerDay = 1000 * 60 * 60 * 24;
-    const daysRemaining = Math.max(
-      1,
-      Math.ceil((cycleEnd.getTime() - today.getTime()) / msPerDay),
-    );
-    const dailyMargin = Math.max(0, potentialSavings / daysRemaining);
+    let dailyMargin = 0;
+    let adjustedDailyMargin = 0;
+
+    if (activeCycle.isCurrent) {
+      const cycleStart = new Date(cycleStartDateStr);
+      let cycleEnd = new Date(cycleStart);
+      cycleEnd.setMonth(cycleEnd.getMonth() + 1);
+      const daysRemaining = Math.max(
+        1,
+        Math.ceil((cycleEnd.getTime() - today.getTime()) / msPerDay),
+      );
+      dailyMargin = Math.max(0, potentialSavings / daysRemaining);
+      adjustedDailyMargin = Math.max(0, adjustedPotentialSavings / daysRemaining);
+    } else {
+      const cycleStart = new Date(cycleStartDateStr);
+      const cycleEnd = cycleEndDateStr
+        ? new Date(cycleEndDateStr)
+        : new Date(cycleStart);
+      const totalCycleDays = Math.max(
+        1,
+        Math.ceil((cycleEnd.getTime() - cycleStart.getTime()) / msPerDay),
+      );
+      dailyMargin = Math.max(0, potentialSavings / totalCycleDays);
+      adjustedDailyMargin = Math.max(0, adjustedPotentialSavings / totalCycleDays);
+    }
 
     const savingsMetrics = {
       rate: savingsRate,
@@ -221,13 +356,23 @@ export function Overview({
       dailyMargin: dailyMargin,
     };
 
+    const adjustedSavingsMetrics = {
+      rate: adjustedSavingsRate,
+      isHealthy: adjustedSavingsRate >= 20,
+      dailyMargin: adjustedDailyMargin,
+    };
+
     return {
+      activeCycle,
       cycleStartDateStr,
+      cycleEndDateStr,
       totalIncome,
       totalExpenses,
       currentMonthRecurring,
       currentMonthVariable,
       potentialSavings,
+      adjustedPotentialSavings,
+      savingsInvestmentsAmount,
       antExpenses,
       antExpensesTotal,
       recurring,
@@ -235,6 +380,7 @@ export function Overview({
       incomeBreakdown,
       expenseBreakdown,
       savingsMetrics,
+      adjustedSavingsMetrics,
     };
   }, [
     transactions,
@@ -242,8 +388,7 @@ export function Overview({
     subscriptionMonthsBack,
     antExpenseMonthsBack,
     antExpenseThreshold,
-    userPaydayStart,
-    userPaydayEnd,
+    activeCycle,
   ]);
 
   return (
@@ -294,7 +439,12 @@ export function Overview({
       </div>
 
       {view === "dashboard" ? (
-        <CashflowDashboard insights={insights} />
+        <CashflowDashboard
+          insights={insights}
+          availableCycles={availableCycles}
+          selectedCycleId={activeCycle.id}
+          setSelectedCycleId={setSelectedCycleId}
+        />
       ) : (
         <SavingsOpportunities
           insights={insights}
@@ -310,14 +460,97 @@ export function Overview({
   );
 }
 
-function CashflowDashboard({ insights }: { insights: any }) {
+function CashflowDashboard({
+  insights,
+  availableCycles,
+  selectedCycleId,
+  setSelectedCycleId,
+}: {
+  insights: any;
+  availableCycles: PayrollCycle[];
+  selectedCycleId: string;
+  setSelectedCycleId: (id: string) => void;
+}) {
   const [selectedDetail, setSelectedDetail] = React.useState<{title: string, txs: Transaction[]} | null>(null);
+  const [savingsMode, setSavingsMode] = React.useState<"standard" | "adjusted">("standard");
+
+  const isAdjusted = savingsMode === "adjusted";
+  const currentSavings = isAdjusted ? insights.adjustedPotentialSavings : insights.potentialSavings;
+  const currentMetrics = isAdjusted ? insights.adjustedSavingsMetrics : insights.savingsMetrics;
+  const activeCycle = insights.activeCycle || availableCycles[0];
+
+  const availableYears = React.useMemo(() => {
+    const years = Array.from(new Set(availableCycles.map((c) => c.year)));
+    return years.sort((a, b) => b - a);
+  }, [availableCycles]);
+
+  const [selectedYear, setSelectedYear] = React.useState<number>(
+    activeCycle?.year || new Date().getFullYear(),
+  );
+
+  React.useEffect(() => {
+    if (activeCycle?.year) {
+      setSelectedYear(activeCycle.year);
+    }
+  }, [activeCycle?.year]);
+
+  const cyclesForSelectedYear = React.useMemo(() => {
+    return availableCycles.filter((c) => c.year === selectedYear);
+  }, [availableCycles, selectedYear]);
+
+  const handleYearChange = (year: number) => {
+    setSelectedYear(year);
+    const firstCycleInYear = availableCycles.find((c) => c.year === year);
+    if (firstCycleInYear) {
+      setSelectedCycleId(firstCycleInYear.id);
+    }
+  };
 
   return (
     <div className="bg-slate-50 p-6 md:p-10 rounded-3xl border border-slate-100 min-h-[50vh]">
-      <h2 className="text-2xl font-bold tracking-tight text-slate-900 mb-8">
-        Radiografía do Mes Actual
-      </h2>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+            {activeCycle?.isCurrent ? "Radiografía do Mes Actual" : `Radiografía: ${activeCycle?.monthName} ${activeCycle?.year}`}
+          </h2>
+          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+            <span className={`inline-block w-2 h-2 rounded-full ${activeCycle?.isCurrent ? "bg-emerald-500" : "bg-blue-500"}`}></span>
+            Ciclo de nómina: <span className="font-semibold text-slate-700">{activeCycle?.dateRangeText}</span>
+          </p>
+        </div>
+
+        {/* Selector de ano e mes */}
+        <div className="flex items-center gap-2 bg-white px-3.5 py-2 rounded-2xl border border-slate-200 shadow-sm shrink-0">
+          <Calendar size={18} className="text-slate-500 shrink-0" />
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedYear}
+              onChange={(e) => handleYearChange(Number(e.target.value))}
+              className="bg-slate-50 hover:bg-slate-100 text-slate-900 font-bold text-sm px-2.5 py-1.5 rounded-xl border border-slate-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Seleccionar ano"
+            >
+              {availableYears.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedCycleId}
+              onChange={(e) => setSelectedCycleId(e.target.value)}
+              className="bg-slate-50 hover:bg-slate-100 text-slate-900 font-bold text-sm px-2.5 py-1.5 rounded-xl border border-slate-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Seleccionar mes do ciclo de nómina"
+            >
+              {cyclesForSelectedYear.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.monthName} {c.isCurrent ? "• Actual" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
 
       {/* Waterfall Visualizer */}
       <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-200 mb-8">
@@ -326,14 +559,18 @@ function CashflowDashboard({ insights }: { insights: any }) {
             <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-2xl mb-4 border border-emerald-200">
               +
             </div>
-            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">
-              Ingresos
-            </span>
-            <span className="text-3xl font-black text-emerald-600 mb-6">
-              {insights.totalIncome.toFixed(0)} €
-            </span>
+            <div className="w-full min-h-[3.25rem] flex items-center justify-center text-center mb-2">
+              <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                Ingresos
+              </span>
+            </div>
+            <div className="w-full min-h-[4rem] flex flex-col items-center justify-start mb-6">
+              <span className="text-3xl font-black text-emerald-600">
+                {insights.totalIncome.toFixed(0)} €
+              </span>
+            </div>
             
-            <div className="w-full flex flex-col gap-2 text-sm text-slate-600">
+            <div className="w-full flex flex-col gap-2 text-sm text-slate-600 h-[355px] overflow-y-auto pr-1">
               <button onClick={() => setSelectedDetail({ title: "💼 Nómina / Pensión", txs: insights.incomeBreakdown?.nomina?.txs || [] })} className="w-full flex justify-between items-center bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer p-2.5 rounded-lg border border-slate-100">
                 <span className="truncate pr-2">💼 Nómina / Pensión</span>
                 <span className="font-bold shrink-0">{insights.incomeBreakdown?.nomina.total.toFixed(0)} €</span>
@@ -352,14 +589,22 @@ function CashflowDashboard({ insights }: { insights: any }) {
             <div className="w-16 h-16 rounded-2xl bg-rose-100 text-rose-500 flex items-center justify-center font-bold text-2xl mb-4 border border-rose-200">
               -
             </div>
-            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1 text-center">
-              Gastos
-            </span>
-            <span className="text-3xl font-black text-rose-600 mb-6">
-              {insights.totalExpenses.toFixed(0)} €
-            </span>
+            <div className="w-full min-h-[3.25rem] flex items-center justify-center text-center mb-2">
+              <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                Gastos
+              </span>
+            </div>
+            <div className="w-full min-h-[4rem] flex flex-col items-center justify-start mb-6">
+              <span className="text-3xl font-black text-rose-600">
+                {insights.totalExpenses.toFixed(0)} €
+              </span>
+              <span className="text-sm font-bold text-rose-400 mt-1 flex items-center gap-1.5" title="Gastos sen Aforro e Investimento">
+                ({(insights.totalExpenses - (insights.expenseBreakdown["Aforro e Investimento"]?.total || 0)).toFixed(0)} €)
+                <span className="text-xs font-medium text-slate-400">Gastos menos aforro e investimento</span>
+              </span>
+            </div>
             
-            <div className="w-full flex flex-col gap-2 text-sm text-slate-600">
+            <div className="w-full flex flex-col gap-2 text-sm text-slate-600 h-[355px] overflow-y-auto pr-1">
               {Object.entries(insights.expenseBreakdown || {})
                 .sort((a: any, b: any) => b[1].total - a[1].total)
                 .map(([catName, data]: [string, any]) => (
@@ -371,34 +616,42 @@ function CashflowDashboard({ insights }: { insights: any }) {
             </div>
           </div>
           <div className="flex flex-col items-center p-4 bg-white z-10 w-full">
-            <div
-              className={`w-16 h-16 rounded-2xl flex items-center justify-center font-bold text-2xl mb-4 border ${insights.potentialSavings >= 0 ? "bg-slate-900 text-white border-slate-900" : "bg-rose-600 text-white border-rose-700"}`}
+            <button
+              type="button"
+              onClick={() => setSavingsMode(savingsMode === "standard" ? "adjusted" : "standard")}
+              className={`w-16 h-16 rounded-2xl flex items-center justify-center font-bold text-2xl mb-4 border-2 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer ${currentSavings >= 0 ? "bg-slate-900 text-white border-slate-700 hover:border-slate-500" : "bg-rose-600 text-white border-rose-800 hover:border-rose-400"}`}
+              title="Preme para cambiar o modo de cálculo"
+              aria-label="Cambiar modo de cálculo de aforro"
             >
               =
+            </button>
+            <div className="w-full min-h-[3.25rem] flex items-center justify-center text-center mb-2 px-1">
+              <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                {savingsMode === "standard" ? "Aforro total" : "Aforro total menos Aforro e investimento"}
+              </span>
             </div>
-            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1 text-center">
-              Aforro Total
-            </span>
-            <span
-              className={`text-3xl font-black mb-6 ${insights.potentialSavings >= 0 ? "text-slate-900" : "text-rose-600"}`}
-            >
-              {insights.potentialSavings.toFixed(0)} €
-            </span>
+            <div className="w-full min-h-[4rem] flex flex-col items-center justify-start mb-6">
+              <span
+                className={`text-3xl font-black ${currentSavings >= 0 ? "text-slate-900" : "text-rose-600"}`}
+              >
+                {currentSavings.toFixed(0)} €
+              </span>
+            </div>
             
-            <div className="w-full flex flex-col gap-2 text-sm text-slate-600">
+            <div className="w-full flex flex-col gap-2 text-sm text-slate-600 h-[355px] overflow-y-auto pr-1">
               <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                 <span className="truncate pr-2">📊 Taxa de aforro</span>
-                <span className="font-bold shrink-0">{insights.savingsMetrics?.rate.toFixed(1)}%</span>
+                <span className="font-bold shrink-0">{currentMetrics?.rate.toFixed(1)}%</span>
               </div>
               <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                 <span className="truncate pr-2">⚖️ Obxectivo</span>
-                <span className={`font-bold shrink-0 ${insights.savingsMetrics?.isHealthy ? 'text-emerald-600' : 'text-amber-600'}`}>
-                  {insights.savingsMetrics?.isHealthy ? 'Saudable' : 'Mellorable'}
+                <span className={`font-bold shrink-0 ${currentMetrics?.isHealthy ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {currentMetrics?.isHealthy ? 'Saudable' : 'Mellorable'}
                 </span>
               </div>
               <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                <span className="truncate pr-2">🗓️ Marxe diario</span>
-                <span className="font-bold shrink-0">{insights.savingsMetrics?.dailyMargin.toFixed(0)} €/día</span>
+                <span className="truncate pr-2">{activeCycle?.isCurrent ? "🗓️ Marxe diario" : "🗓️ Media diaria"}</span>
+                <span className="font-bold shrink-0">{currentMetrics?.dailyMargin.toFixed(0)} €/día</span>
               </div>
             </div>
           </div>
@@ -408,11 +661,9 @@ function CashflowDashboard({ insights }: { insights: any }) {
       <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 flex items-start gap-4">
         <Info className="text-blue-500 shrink-0 mt-0.5" size={20} />
         <p className="text-sm text-blue-900 font-medium">
-          A <strong>Radiografía do Mes Actual</strong> móstrache o resumo de
-          ingresos e gastos contabilizados dende a túa última nómina (detectada
-          o {insights.cycleStartDateStr.split("-").reverse().join("/")}). O teu{" "}
-          <strong>Aforro Total</strong> é a diferenza directa entre o que entrou
-          e o que saíu neste ciclo.
+          A <strong>Radiografía {activeCycle?.isCurrent ? "do Mes Actual" : `de ${activeCycle?.monthName} ${activeCycle?.year}`}</strong> móstrache o resumo de
+          ingresos e gastos contabilizados no ciclo de nómina ({activeCycle?.dateRangeText}). O teu{" "}
+          <strong>Aforro Total</strong> {savingsMode === "standard" ? "é a diferenza directa entre o que entrou e o que saíu neste ciclo." : "está calculado descontando dos gastos a supercategoría de Aforro e Investimento."}
         </p>
       </div>
 

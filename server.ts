@@ -3,10 +3,24 @@ import cors from "cors";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 
 dotenv.config();
+
+const logDebug = (title: string, data?: any) => {
+  try {
+    const timestamp = new Date().toISOString();
+    const formatted = data !== undefined 
+      ? (typeof data === "object" ? JSON.stringify(data, null, 2) : String(data))
+      : "";
+    const line = `[${timestamp}] ${title}\n${formatted}\n---\n`;
+    fs.appendFileSync("/tmp/enablebanking_debug.log", line);
+  } catch (err) {
+    console.error("Failed to write to debug log:", err);
+  }
+};
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -79,20 +93,42 @@ async function startServer() {
     }
   });
 
+  app.get('/api/enablebanking/debug_logs', (req, res) => {
+    try {
+      if (fs.existsSync('/tmp/enablebanking_debug.log')) {
+        const content = fs.readFileSync('/tmp/enablebanking_debug.log', 'utf8');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send(content);
+      } else {
+        res.send('No debug logs yet.');
+      }
+    } catch (err: any) {
+      res.status(500).send('Error reading debug logs: ' + err.message);
+    }
+  });
+
   app.post('/api/enablebanking/start_auth', async (req, res) => {
     try {
       const token = generateEnableBankingJWT();
-      const { redirect_uri, aspsp, valid_from } = req.body;
+      const { redirect_uri, aspsp, psu_type, auth_method } = req.body;
       
-      const startAuthBody = {
+      const startAuthBody: any = {
         access: {
-          valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          ...(valid_from ? { valid_from: new Date(valid_from).toISOString() } : { valid_from: new Date(Date.now() - 5 * 365 * 24 * 60 * 60 * 1000).toISOString() })
+          valid_until: new Date(Date.now() + 89 * 24 * 60 * 60 * 1000).toISOString(),
+          balances: true,
+          transactions: true
         },
         aspsp: aspsp || { name: "Banco de Sabadell", country: "ES" },
+        psu_type: psu_type || "personal",
         state: "some-random-state-12345",
         redirect_url: redirect_uri || `${req.protocol}://${req.get('host')}/api/enablebanking/callback`
       };
+
+      if (auth_method) {
+        startAuthBody.auth_method = auth_method;
+      }
+
+      logDebug('EnableBanking /auth request body:', startAuthBody);
 
       const response = await fetch('https://api.enablebanking.com/auth', {
         method: 'POST',
@@ -104,6 +140,7 @@ async function startServer() {
       });
 
       const data = await response.json();
+      logDebug(`EnableBanking /auth response status: ${response.status}`, data);
 
       if (!response.ok) {
         return res.status(response.status).json({
@@ -114,12 +151,15 @@ async function startServer() {
 
       res.json({ auth_url: data.url });
     } catch (error: any) {
+      logDebug('Error starting auth:', error.message);
+      console.error('Error starting auth:', error);
       res.status(500).json({ error: 'Failed to start auth', details: error.message });
     }
   });
 
   app.get('/api/enablebanking/callback', (req, res) => {
     const { code, error } = req.query;
+    logDebug('EnableBanking /callback query:', { code, error });
     if (error) {
       return res.send(`
         <html><body><script>
@@ -152,6 +192,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Authorization code is missing' });
       }
 
+      logDebug('EnableBanking /accounts requested with code:', code);
       const token = generateEnableBankingJWT();
 
       const sessionResponse = await fetch('https://api.enablebanking.com/sessions', {
@@ -163,7 +204,9 @@ async function startServer() {
         body: JSON.stringify({ code })
       });
 
-      const sessionData = await sessionResponse.json();
+      const sessionData: any = await sessionResponse.json();
+      logDebug(`EnableBanking /sessions raw response (status ${sessionResponse.status}):`, sessionData);
+
       if (!sessionResponse.ok) {
         return res.status(sessionResponse.status).json({
           error: 'Failed to create session',
@@ -171,10 +214,94 @@ async function startServer() {
         });
       }
 
-      const accounts = sessionData.accounts || [];
-      res.json({ accounts });
+      let rawAccounts: any[] = sessionData.accounts || [];
+      let getSessionData: any = null;
+
+      // If accounts array is empty, check if session has accounts_data or can be fetched via GET /sessions/:id
+      if (rawAccounts.length === 0 && sessionData.session_id) {
+        try {
+          const getSessionRes = await fetch(`https://api.enablebanking.com/sessions/${sessionData.session_id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (getSessionRes.ok) {
+            getSessionData = await getSessionRes.json();
+            logDebug('EnableBanking GET /sessions/:id response:', getSessionData);
+            if (Array.isArray(getSessionData.accounts) && getSessionData.accounts.length > 0) {
+              rawAccounts = getSessionData.accounts;
+            } else if (Array.isArray(getSessionData.accounts_data) && getSessionData.accounts_data.length > 0) {
+              rawAccounts = getSessionData.accounts_data;
+            }
+          }
+        } catch (sessErr) {
+          logDebug('Error fetching session details:', sessErr);
+        }
+      }
+
+      if (rawAccounts.length === 0 && Array.isArray(sessionData.accounts_data) && sessionData.accounts_data.length > 0) {
+        rawAccounts = sessionData.accounts_data;
+      }
+
+      // Concurrently resolve details and balances for each account
+      const accounts = await Promise.all(
+        rawAccounts.map(async (accItem: any) => {
+          const accountUid = typeof accItem === 'string' ? accItem : (accItem.uid || accItem.id);
+          let details: any = {};
+          let balances: any[] = [];
+
+          if (accountUid) {
+            try {
+              const [detailsRes, balancesRes] = await Promise.all([
+                fetch(`https://api.enablebanking.com/accounts/${accountUid}/details`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                }),
+                fetch(`https://api.enablebanking.com/accounts/${accountUid}/balances`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                })
+              ]);
+
+              if (detailsRes.ok) {
+                details = await detailsRes.json();
+              } else {
+                logDebug(`Could not get details for account ${accountUid}:`, detailsRes.status);
+              }
+
+              if (balancesRes.ok) {
+                const balJson: any = await balancesRes.json();
+                balances = balJson.balances || [];
+              } else {
+                logDebug(`Could not get balances for account ${accountUid}:`, balancesRes.status);
+              }
+            } catch (fetchErr: any) {
+              logDebug(`Error resolving details for account ${accountUid}:`, fetchErr.message);
+            }
+          }
+
+          const baseObj = typeof accItem === 'object' ? accItem : {};
+          return {
+            ...baseObj,
+            ...details,
+            uid: accountUid || details.uid || baseObj.uid,
+            id: accountUid || details.uid || baseObj.uid,
+            balances: balances.length > 0 ? balances : (baseObj.balances || details.balances || [])
+          };
+        })
+      );
+
+      logDebug('Resolved accounts to return (count: ' + accounts.length + '):', accounts);
+      res.json({ 
+        accounts,
+        debug: {
+          session_id: sessionData.session_id,
+          status: getSessionData?.status || sessionData.status || "AUTHORIZED",
+          sessionData,
+          getSessionData,
+          rawAccountsCount: rawAccounts.length
+        }
+      });
     } catch (error: any) {
-      res.status(500).json({ error: 'Internal server error fetching accounts' });
+      logDebug('Internal server error fetching accounts:', error.message);
+      console.error('Internal server error fetching accounts:', error);
+      res.status(500).json({ error: 'Internal server error fetching accounts', details: error.message });
     }
   });
 

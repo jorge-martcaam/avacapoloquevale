@@ -45,7 +45,10 @@
         "counterpartyIban": { "type": "string" },
         "mcc": { "type": "string" },
         "mccDescription": { "type": "string" },
-        "receiptDetails": { "type": "object" }
+        "receiptDetails": { "type": "object" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "currency": { "type": "string" }
       },
       "required": ["transaction_id", "userId", "name", "amount", "date"]
     },

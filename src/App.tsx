@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Wallet,
   Landmark,
@@ -26,15 +26,8 @@ import {
   updateTransactionSuperCategory,
   updateTransactionsByCategoryAndName,
   updateTransactionsBySuperCategoryAndName,
-  renameCategory,
-  assignSuperCategory,
   learnCategory,
-  bulkUpdateTransactionsByNames,
-  deleteAllLearnedCategories,
-  resetAllTransactionCategories,
-  autoClassifyCurrentTransactions,
   updateTransactionReceipt,
-  normalizeName,
 } from "./lib/firestore";
 import AuthScreen from "./components/AuthScreen";
 import { Overview } from "./Overview";
@@ -327,12 +320,17 @@ function EnableBankingConnectButton({
       setErrorMsg(null);
       const redirect_uri =
         window.location.origin + "/api/enablebanking/callback";
+      const personalMethod = aspspObj.auth_methods?.find(
+        (m: any) => m.psu_type === "personal",
+      );
       const response = await fetch("/api/enablebanking/start_auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           redirect_uri,
-          aspsp: aspspObj,
+          aspsp: { name: aspspObj.name, country: aspspObj.country },
+          psu_type: "personal",
+          auth_method: personalMethod?.name || undefined,
           valid_from: startDate,
         }),
       });
@@ -386,16 +384,8 @@ function EnableBankingConnectButton({
           try {
             const txs = data.transactions || [];
 
-            // Deduplicate: Solo insertar movementos novos que non existan xa
-            const existingIds = new Set(
-              existingTransactions.map((t) => t.transaction_id),
-            );
-            const newTxs = txs.filter(
-              (t: any) => !existingIds.has(t.transaction_id),
-            );
-
-            if (newTxs.length > 0) {
-              await saveTransactionsToFirestore(newTxs);
+            if (txs.length > 0) {
+              await saveTransactionsToFirestore(txs);
             }
 
             // Build and save AccountBalance objects
@@ -411,18 +401,16 @@ function EnableBankingConnectButton({
                 let balNum = 0;
                 let curr = acc.currency || "EUR";
                 if (acc.balances && acc.balances.length > 0) {
-                  const bal =
-                    acc.balances[0].balanceAmount ||
-                    acc.balances[0].amount ||
-                    {};
-                  if (bal.amount !== undefined) {
+                  const b = acc.balances[0];
+                  const bal = b.balance_amount || b.balanceAmount || b.amount || (typeof b === "object" ? b : {});
+                  if (bal && bal.amount !== undefined) {
                     balNum = Number(bal.amount);
                     curr = bal.currency || curr;
-                  } else if (
-                    acc.balances[0] !== undefined &&
-                    typeof acc.balances[0] === "number"
-                  ) {
-                    balNum = Number(acc.balances[0]);
+                  } else if (typeof b === "number") {
+                    balNum = Number(b);
+                  } else if (b.amount !== undefined) {
+                    balNum = Number(b.amount);
+                    curr = b.currency || curr;
                   }
                 }
                 let iban = "";
@@ -447,7 +435,7 @@ function EnableBankingConnectButton({
                   balance: balNum,
                   currency: curr,
                   iban: iban,
-                  bankName: selectedAspsp || "",
+                  bankName: selectedBank?.name || selectedAspsp.split(":::")[0] || "",
                 };
               });
 
@@ -512,7 +500,10 @@ function EnableBankingConnectButton({
                   );
                   setStep(2);
                 } else {
-                  setErrorMsg("Non se atoparon contas.");
+                  const debugInfo = data.debug?.sessionData 
+                    ? ` (Estado sesión: ${data.debug?.status || "sen estado"}, Contas detectadas: ${data.debug?.rawAccountsCount ?? 0})` 
+                    : "";
+                  setErrorMsg(`Non se atoparon contas nesta entidade bancaria.${debugInfo}`);
                 }
               } catch (err) {
                 console.error("Error setting accounts", err);
@@ -539,7 +530,7 @@ function EnableBankingConnectButton({
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  const selectedBank = aspsps.find((a) => a.name === selectedAspsp);
+  const selectedBank = aspsps.find((a) => `${a.name}:::${a.country}` === selectedAspsp);
 
   if (step === 2) {
     return (
@@ -559,15 +550,14 @@ function EnableBankingConnectButton({
             const name = acc.name || acc.product || acc.account_id?.iban || id;
             let balanceStr = "Saldo descoñecido";
             if (acc.balances && acc.balances.length > 0) {
-              const bal =
-                acc.balances[0].balanceAmount || acc.balances[0].amount || {};
-              if (bal.amount !== undefined) {
+              const b = acc.balances[0];
+              const bal = b.balance_amount || b.balanceAmount || b.amount || (typeof b === "object" ? b : {});
+              if (bal && bal.amount !== undefined) {
                 balanceStr = `${bal.amount} ${bal.currency || acc.currency || "EUR"}`;
-              } else if (
-                acc.balances[0] !== undefined &&
-                typeof acc.balances[0] === "number"
-              ) {
-                balanceStr = `${acc.balances[0]} ${acc.currency || "EUR"}`;
+              } else if (typeof b === "number") {
+                balanceStr = `${b} ${acc.currency || "EUR"}`;
+              } else if (b.amount !== undefined) {
+                balanceStr = `${b.amount} ${b.currency || acc.currency || "EUR"}`;
               }
             }
 
@@ -635,7 +625,7 @@ function EnableBankingConnectButton({
               .filter((a) => a.country === "ES")
               .sort((a, b) => a.name.localeCompare(b.name, 'gl'))
               .map((aspsp, i) => (
-                <option key={i} value={aspsp.name}>
+                <option key={i} value={`${aspsp.name}:::${aspsp.country}`}>
                   {aspsp.name}
                 </option>
               ))}

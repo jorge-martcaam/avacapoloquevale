@@ -88,8 +88,9 @@ export async function saveAccountsToFirestore(
   const path = `users/${user.uid}/accounts`;
 
   for (const a of accounts) {
-    const docRef = doc(db, path, a.accountId);
-    batch.set(docRef, { ...a, userId: user.uid }, { merge: true });
+    const safeAccountId = String(a.accountId || "").replace(/[/\\#?]/g, "_").trim().substring(0, 128) || `acc_${Date.now()}`;
+    const docRef = doc(db, path, safeAccountId);
+    batch.set(docRef, { ...a, accountId: safeAccountId, userId: user.uid }, { merge: true });
   }
 
   try {
@@ -137,6 +138,11 @@ export interface Transaction {
   } | null;
 }
 
+export function sanitizeTransactionId(id: string): string {
+  if (!id) return `tx_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  return String(id).replace(/[/\\#?]/g, "_").trim().substring(0, 128);
+}
+
 export async function updateTransactionReceipt(
   transactionId: string,
   receiptData: any,
@@ -146,15 +152,24 @@ export async function updateTransactionReceipt(
     throw new Error("User not authenticated");
   }
 
+  const safeId = sanitizeTransactionId(transactionId);
+  const path = `users/${user.uid}/transactions`;
+  const docRef = doc(db, path, safeId);
+  const snap = await getDoc(docRef);
+  if (snap.exists()) {
+    await updateDoc(docRef, { receiptDetails: receiptData });
+    return;
+  }
+
   const q = query(
-    collection(db, `users/${user.uid}/transactions`),
+    collection(db, path),
     where("transaction_id", "==", transactionId),
   );
   const snapshot = await getDocs(q);
 
   if (!snapshot.empty) {
-    const docRef = snapshot.docs[0].ref;
-    await updateDoc(docRef, { receiptDetails: receiptData });
+    const matchedDocRef = snapshot.docs[0].ref;
+    await updateDoc(matchedDocRef, { receiptDetails: receiptData });
   } else {
     throw new Error("Transaction not found");
   }
@@ -209,13 +224,17 @@ export async function saveTransactionsToFirestore(
       string,
       { category: string; superCategory?: string }
     > = {};
+    const existingDocsMap = new Map<string, any>();
 
     snapshot.docs.forEach((docSnap) => {
       const data = docSnap.data();
+      existingDocsMap.set(docSnap.id, data);
+      if (data.transaction_id) {
+        existingDocsMap.set(data.transaction_id, data);
+      }
       if (
         data.name &&
         data.category &&
-        data.category !== "Outros" &&
         data.category !== "Outros"
       ) {
         categoryMap[normalizeName(data.name)] = {
@@ -248,48 +267,73 @@ export async function saveTransactionsToFirestore(
     let count = 0;
 
     for (const t of transactions) {
-      const docRef = doc(db, path, t.transaction_id);
+      const safeId = sanitizeTransactionId(t.transaction_id);
+      const docRef = doc(db, path, safeId);
+
+      const existing = existingDocsMap.get(safeId) || existingDocsMap.get(t.transaction_id);
 
       // Target category: check if we have a learned category
       const learned = categoryMap[normalizeName(t.name)];
 
       // Strictly extract only the allowed fields to avoid failing Firestore rules
       const dataToWrite: any = {
-        transaction_id: String(t.transaction_id),
+        transaction_id: safeId,
         userId: user.uid,
-        name: String(t.name || ""),
+        name: String(t.name || "").substring(0, 1000),
         amount: Number(t.amount || 0),
-        date: String(t.date || ""),
+        date: String(t.date || "").substring(0, 64),
       };
       if (t.accountId || (t as any).account_id) {
-        dataToWrite.accountId = String(t.accountId || (t as any).account_id);
+        dataToWrite.accountId = String(t.accountId || (t as any).account_id).substring(0, 256);
       }
       if (t.counterparty) {
-        dataToWrite.counterparty = String(t.counterparty);
+        dataToWrite.counterparty = String(t.counterparty).substring(0, 500);
       }
       if (t.counterpartyIban) {
-        dataToWrite.counterpartyIban = String(t.counterpartyIban);
+        dataToWrite.counterpartyIban = String(t.counterpartyIban).substring(0, 64);
       }
       if (t.bookingDate) {
-        dataToWrite.bookingDate = String(t.bookingDate);
+        dataToWrite.bookingDate = String(t.bookingDate).substring(0, 64);
       }
       if (t.valueDate) {
-        dataToWrite.valueDate = String(t.valueDate);
+        dataToWrite.valueDate = String(t.valueDate).substring(0, 64);
       }
       if (t.mcc) {
-        dataToWrite.mcc = String(t.mcc);
+        dataToWrite.mcc = String(t.mcc).substring(0, 32);
       }
       if (t.mccDescription) {
-        dataToWrite.mccDescription = String(t.mccDescription);
+        dataToWrite.mccDescription = String(t.mccDescription).substring(0, 500);
+      }
+      if ((t as any).status) {
+        dataToWrite.status = String((t as any).status).substring(0, 64);
+      }
+      if ((t as any).currency) {
+        dataToWrite.currency = String((t as any).currency).substring(0, 16);
       }
 
-      const finalCategory = learned?.category || t.category || "Outros";
-      if (finalCategory) {
-        dataToWrite.category = String(finalCategory);
-      }
-      const finalSuperCategory = learned?.superCategory || t.superCategory;
-      if (finalSuperCategory) {
-        dataToWrite.superCategory = String(finalSuperCategory);
+      // Preserve user-managed fields if transaction already exists
+      if (existing) {
+        if (existing.category) {
+          dataToWrite.category = String(existing.category).substring(0, 128);
+        }
+        if (existing.superCategory) {
+          dataToWrite.superCategory = String(existing.superCategory).substring(0, 128);
+        }
+        if (existing.notes) {
+          dataToWrite.notes = String(existing.notes).substring(0, 1000);
+        }
+        if (existing.receiptDetails) {
+          dataToWrite.receiptDetails = existing.receiptDetails;
+        }
+      } else {
+        const finalCategory = learned?.category || t.category || "Outros";
+        if (finalCategory) {
+          dataToWrite.category = String(finalCategory).substring(0, 128);
+        }
+        const finalSuperCategory = learned?.superCategory || t.superCategory;
+        if (finalSuperCategory) {
+          dataToWrite.superCategory = String(finalSuperCategory).substring(0, 128);
+        }
       }
 
       currentBatch.set(docRef, dataToWrite, { merge: true });
@@ -319,20 +363,16 @@ export async function updateTransactionSuperCategory(
     throw new Error("User not authenticated");
   }
 
+  const safeId = sanitizeTransactionId(transaction_id);
   const path = `users/${user.uid}/transactions`;
-  const docRef = doc(db, path, transaction_id);
+  const docRef = doc(db, path, safeId);
 
   try {
     const dataToWrite: any = {
       userId: user.uid,
-      transaction_id: transaction_id,
+      transaction_id: safeId,
+      superCategory: newSuperCategory || "",
     };
-
-    if (newSuperCategory) {
-      dataToWrite.superCategory = newSuperCategory;
-    } else {
-      dataToWrite.superCategory = "";
-    }
 
     await setDoc(docRef, dataToWrite, { merge: true });
   } catch (error) {
@@ -349,19 +389,16 @@ export async function updateTransactionCategory(
     throw new Error("User not authenticated");
   }
 
+  const safeId = sanitizeTransactionId(transaction_id);
   const path = `users/${user.uid}/transactions`;
-  const docRef = doc(db, path, transaction_id);
+  const docRef = doc(db, path, safeId);
 
   try {
     const dataToWrite: any = {
       userId: user.uid,
-      transaction_id: transaction_id,
+      transaction_id: safeId,
+      category: newCategory || "",
     };
-    if (newCategory) {
-      dataToWrite.category = newCategory;
-    } else {
-      dataToWrite.category = "";
-    }
 
     await setDoc(docRef, dataToWrite, { merge: true });
   } catch (error) {

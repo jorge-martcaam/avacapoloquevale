@@ -37,22 +37,25 @@ service cloud.firestore {
 
     function isValidTransaction(data, userId) {
       return data.keys().hasAll(['transaction_id', 'userId', 'name', 'amount', 'date']) &&
-             data.transaction_id is string && data.transaction_id.size() <= 128 &&
+             data.transaction_id is string && data.transaction_id.size() <= 256 &&
              data.userId == userId &&
-             data.name is string && data.name.size() <= 256 &&
+             data.name is string && data.name.size() <= 1000 &&
              data.amount is number &&
-             data.date is string && data.date.size() <= 32 &&
-             ( !('accountId' in data) || (data.accountId is string && data.accountId.size() <= 128) ) &&
-             ( !('bookingDate' in data) || (data.bookingDate is string && data.bookingDate.size() <= 32) ) &&
-             ( !('valueDate' in data) || (data.valueDate is string && data.valueDate.size() <= 32) ) &&
+             data.date is string && data.date.size() <= 64 &&
+             ( !('accountId' in data) || (data.accountId is string && data.accountId.size() <= 256) ) &&
+             ( !('account_id' in data) || (data.account_id is string && data.account_id.size() <= 256) ) &&
+             ( !('bookingDate' in data) || (data.bookingDate is string && data.bookingDate.size() <= 64) ) &&
+             ( !('valueDate' in data) || (data.valueDate is string && data.valueDate.size() <= 64) ) &&
              ( !('category' in data) || (data.category is string && data.category.size() <= 128) ) &&
              ( !('superCategory' in data) || (data.superCategory is string && data.superCategory.size() <= 128) ) &&
-             ( !('counterparty' in data) || (data.counterparty is string && data.counterparty.size() <= 256) ) &&
+             ( !('counterparty' in data) || (data.counterparty is string && data.counterparty.size() <= 500) ) &&
              ( !('counterpartyIban' in data) || (data.counterpartyIban is string && data.counterpartyIban.size() <= 64) ) &&
              ( !('mcc' in data) || (data.mcc is string && data.mcc.size() <= 32) ) &&
-             ( !('mccDescription' in data) || (data.mccDescription is string && data.mccDescription.size() <= 256) ) &&
+             ( !('mccDescription' in data) || (data.mccDescription is string && data.mccDescription.size() <= 500) ) &&
              ( !('receiptDetails' in data) || (data.receiptDetails is map) ) &&
-             ( !('account_id' in data) || (data.account_id is string && data.account_id.size() <= 128) );
+             ( !('notes' in data) || (data.notes is string && data.notes.size() <= 1000) ) &&
+             ( !('status' in data) || (data.status is string && data.status.size() <= 64) ) &&
+             ( !('currency' in data) || (data.currency is string && data.currency.size() <= 16) );
     }
 
     function isValidLearnedCategory(data) {
@@ -82,9 +85,8 @@ service cloud.firestore {
       match /transactions/{transactionId} {
         allow get: if isOwner(userId) && isValidId(userId) && isValidId(transactionId);
         allow list: if isOwner(userId) && isValidId(userId);
-        allow create: if isOwner(userId) && isValidId(userId) && isValidId(transactionId) && isValidTransaction(incoming(), userId) && incoming().keys().size() <= 16;
-        allow update: if isOwner(userId) && isValidId(userId) && isValidId(transactionId) && isValidTransaction(incoming(), userId) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['category', 'superCategory', 'receiptDetails']);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(transactionId) && isValidTransaction(incoming(), userId) && incoming().keys().size() <= 25;
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(transactionId) && isValidTransaction(incoming(), userId) && incoming().keys().size() <= 25;
         allow delete: if isOwner(userId) && isValidId(userId) && isValidId(transactionId);
       }
 
