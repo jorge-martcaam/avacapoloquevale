@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Transaction } from "./lib/firestore";
 import { TrendingDown, Scissors, Repeat, Wallet, Info, X, Calendar } from "lucide-react";
+import { CashflowHeatmap } from "./CashflowHeatmap";
 
 export interface PayrollCycle {
   id: string;
@@ -444,6 +445,7 @@ export function Overview({
           availableCycles={availableCycles}
           selectedCycleId={activeCycle.id}
           setSelectedCycleId={setSelectedCycleId}
+          transactions={transactions}
         />
       ) : (
         <SavingsOpportunities
@@ -465,11 +467,13 @@ function CashflowDashboard({
   availableCycles,
   selectedCycleId,
   setSelectedCycleId,
+  transactions,
 }: {
   insights: any;
   availableCycles: PayrollCycle[];
   selectedCycleId: string;
   setSelectedCycleId: (id: string) => void;
+  transactions: Transaction[];
 }) {
   const [selectedDetail, setSelectedDetail] = React.useState<{title: string, txs: Transaction[]} | null>(null);
   const [savingsMode, setSavingsMode] = React.useState<"standard" | "adjusted">("standard");
@@ -666,6 +670,9 @@ function CashflowDashboard({
           <strong>Aforro Total</strong> {savingsMode === "standard" ? "é a diferenza directa entre o que entrou e o que saíu neste ciclo." : "está calculado descontando dos gastos a supercategoría de Aforro e Investimento."}
         </p>
       </div>
+
+      {/* Heatmap Section */}
+      <CashflowHeatmap transactions={transactions} />
 
       {selectedDetail && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">

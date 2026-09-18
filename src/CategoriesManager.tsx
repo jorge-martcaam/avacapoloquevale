@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Transaction } from "./lib/firestore";
-import { Search, Play, RefreshCw, Check, Tag, Inbox, Edit2, X, Plus, Trash2 } from "lucide-react";
+import { Search, Play, RefreshCw, Check, Tag, Inbox, Edit2, X, Plus, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import {
   autoClassifyCurrentTransactions,
   getTransactionsFromFirestore,
@@ -440,6 +440,8 @@ function ClasificarView({
   const [isAutoClassifying, setIsAutoClassifying] = useState(false);
   const [showMassEditModal, setShowMassEditModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const handleAutoClassify = async () => {
     setIsAutoClassifying(true);
@@ -473,6 +475,94 @@ function ClasificarView({
     }
     return filtered.sort((a, b) => b.date.localeCompare(a.date));
   }, [transactions, filter, searchQuery]);
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter, searchQuery, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTx.length / pageSize));
+
+  // If items get removed (e.g. classified) and currentPage exceeds totalPages
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedTx = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredTx.slice(start, start + pageSize);
+  }, [filteredTx, currentPage, pageSize]);
+
+  const renderPaginationControls = () => (
+    <div className="flex flex-wrap items-center justify-between gap-3 py-2 px-1 text-xs text-slate-500">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-slate-600">Amosar:</span>
+        <select
+          value={pageSize}
+          onChange={(e) => setPageSize(Number(e.target.value))}
+          className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 font-bold text-slate-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+          aria-label="Movementos por páxina"
+        >
+          <option value={50}>50 por páxina</option>
+          <option value={100}>100 por páxina</option>
+          <option value={250}>250 por páxina</option>
+          <option value={500}>500 por páxina</option>
+        </select>
+        <span className="hidden sm:inline text-slate-300">|</span>
+        <span className="font-medium">
+          {filteredTx.length === 0
+            ? "0 movementos"
+            : `${(currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, filteredTx.length)} de ${filteredTx.length} movementos`}
+        </span>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
+          <button
+            onClick={() => setCurrentPage(1)}
+            disabled={currentPage === 1}
+            className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors text-slate-700"
+            title="Primeira páxina"
+            aria-label="Primeira páxina"
+          >
+            <ChevronsLeft size={16} />
+          </button>
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors text-slate-700"
+            title="Páxina anterior"
+            aria-label="Páxina anterior"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="px-2 font-bold text-slate-800">
+            {currentPage} / {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors text-slate-700"
+            title="Páxina seguinte"
+            aria-label="Páxina seguinte"
+          >
+            <ChevronRight size={16} />
+          </button>
+          <button
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={currentPage === totalPages}
+            className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors text-slate-700"
+            title="Última páxina"
+            aria-label="Última páxina"
+          >
+            <ChevronsRight size={16} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm animate-fade-in">
@@ -537,21 +627,27 @@ function ClasificarView({
           <p className="text-slate-500 mt-1">Non tes movementos pendentes de clasificar.</p>
         </div>
       ) : (
-        <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-          {filteredTx.map(tx => (
-            <TxRow 
-               key={tx.transaction_id || tx.date + tx.name + tx.amount} 
-               tx={tx} 
-               availableCategories={availableCategories} 
-               availableSuperCategories={availableSuperCategories}
-              onUpdate={async (newCat) => {
-                if (tx.transaction_id) await onUpdateCategory(tx.transaction_id, newCat);
-              }}
-              onUpdateSuper={async (newSuperCat) => {
-                if (tx.transaction_id) await onUpdateSuperCategory(tx.transaction_id, newSuperCat);
-              }}
-            />
-          ))}
+        <div className="space-y-4">
+          {renderPaginationControls()}
+          
+          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
+            {paginatedTx.map(tx => (
+              <TxRow 
+                 key={tx.transaction_id || tx.date + tx.name + tx.amount} 
+                 tx={tx} 
+                 availableCategories={availableCategories} 
+                 availableSuperCategories={availableSuperCategories}
+                onUpdate={async (newCat) => {
+                  if (tx.transaction_id) await onUpdateCategory(tx.transaction_id, newCat);
+                }}
+                onUpdateSuper={async (newSuperCat) => {
+                  if (tx.transaction_id) await onUpdateSuperCategory(tx.transaction_id, newSuperCat);
+                }}
+              />
+            ))}
+          </div>
+
+          {totalPages > 1 && renderPaginationControls()}
         </div>
       )}
 

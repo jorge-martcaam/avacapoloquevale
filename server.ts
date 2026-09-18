@@ -277,9 +277,24 @@ async function startServer() {
           }
 
           const baseObj = typeof accItem === 'object' ? accItem : {};
+          const aspspBankName = sessionData.aspsp?.name;
+          let bankName = aspspBankName || baseObj.bankName || details.bankName;
+          const iban = baseObj.account_id?.iban || details.account_id?.iban;
+          if (!bankName && iban && iban.length >= 8) {
+            const clean = iban.replace(/\s/g, "").toUpperCase();
+            if (clean.startsWith("ES")) {
+              const code = clean.substring(4, 8);
+              if (code === "2080") bankName = "Abanca";
+              else if (code === "0073") bankName = "Openbank";
+              else if (code === "1583") bankName = "Caixa Rural Galega";
+            }
+          }
+
           return {
             ...baseObj,
             ...details,
+            bankName: bankName,
+            aspsp: sessionData.aspsp || baseObj.aspsp,
             uid: accountUid || details.uid || baseObj.uid,
             id: accountUid || details.uid || baseObj.uid,
             balances: balances.length > 0 ? balances : (baseObj.balances || details.balances || [])
@@ -341,6 +356,7 @@ async function startServer() {
           });
 
           const txData = await txResponse.json();
+          logDebug(`Transactions fetch for account ${accountId} (status ${txResponse.status}):`, txData);
           if (!txResponse.ok) {
             console.error(`Failed to fetch transactions for account ${accountId}:`, txData);
             break; // Skip to next account on failure
